@@ -1,0 +1,13 @@
+.venv/
+ven/
+
+__pycache__/
+*.pyc
+
+.claude
+
+oldthings
+
+ignore
+
+Data/
