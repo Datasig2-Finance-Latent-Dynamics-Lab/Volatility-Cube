@@ -2,6 +2,7 @@ from __future__ import annotations
 import numpy as np
 import matplotlib.pyplot as plt
 from neural_processes.data.base import SurfaceDataset
+from utils.pricing import bs_call_from_iv
 
 
 # ── Evaluation ────────────────────────────────────────────────────────────────
@@ -136,6 +137,20 @@ def eval_zeroshot(model, dataset, indices, n_ctx=50, n_reps=10):
 
 def plot_reconstruction(model, dataset, day_idx, ctx_sizes=(5, 20, 50, 100),
                         feat_dim_x=0, feat_dim_group=1, out_path=None):
+    """TODO.
+
+    Args:
+        model: TODO.
+        dataset: TODO.
+        day_idx: TODO.
+        ctx_sizes: TODO.
+        feat_dim_x: TODO.
+        feat_dim_group: TODO.
+        out_path: TODO.
+
+    Returns:
+        TODO.
+    """
     ctx_max     = dataset.ctx_max
     n_assets    = dataset.n_assets
     asset_names = dataset.meta.get("asset_names", [f"asset_{i}" for i in range(n_assets)])
@@ -181,6 +196,16 @@ def plot_reconstruction(model, dataset, day_idx, ctx_sizes=(5, 20, 50, 100),
 
 
 def plot_rmse_vs_ctx(val_rmse, ood_rmse=None, out_path=None):
+    """TODO.
+
+    Args:
+        val_rmse: TODO.
+        ood_rmse: TODO.
+        out_path: TODO.
+
+    Returns:
+        TODO.
+    """
     fig, ax = plt.subplots(figsize=(7, 4))
     ctx = sorted(val_rmse)
     ax.plot(ctx, [val_rmse[c] for c in ctx], "o-", label="Val", color="C0", lw=2)
@@ -193,6 +218,17 @@ def plot_rmse_vs_ctx(val_rmse, ood_rmse=None, out_path=None):
 
 
 def plot_per_feature_rmse(rmse_by_val, feat_name="maturity", n_ctx=100, out_path=None):
+    """TODO.
+
+    Args:
+        rmse_by_val: TODO.
+        feat_name: TODO.
+        n_ctx: TODO.
+        out_path: TODO.
+
+    Returns:
+        TODO.
+    """
     vals = sorted(rmse_by_val)
     rmse = [rmse_by_val[v] for v in vals]
     fig, ax = plt.subplots(figsize=(9, 4))
@@ -210,6 +246,17 @@ def plot_per_feature_rmse(rmse_by_val, feat_name="maturity", n_ctx=100, out_path
 
 
 def plot_zeroshot(results, asset_names=None, n_ctx=50, out_path=None):
+    """TODO.
+
+    Args:
+        results: TODO.
+        asset_names: TODO.
+        n_ctx: TODO.
+        out_path: TODO.
+
+    Returns:
+        TODO.
+    """
     n_assets = len(results["baseline"])
     names    = asset_names or [f"asset_{i}" for i in range(n_assets)]
     x        = np.arange(n_assets)
@@ -222,6 +269,261 @@ def plot_zeroshot(results, asset_names=None, n_ctx=50, out_path=None):
     ax.set_ylabel("RMSE on excluded asset (IV units)")
     ax.set_title("Zero-Shot Asset Reconstruction")
     ax.legend()
+    _maybe_save(fig, out_path)
+    return fig
+
+
+def plot_call_reconstruction(model, dataset, day_idx, ctx_sizes=(5, 20, 50, 100),
+                             feat_dim_lm=0, feat_dim_T=1, out_path=None):
+    """
+    Like plot_reconstruction but in forward-normalised call-price space.
+
+    Call prices are computed as bs_call_from_iv(iv, lm, T, forward=1, discount=1),
+    giving C / (F * discount) — a purely (iv, lm, T)-driven quantity that strips
+    out the absolute forward level and interest-rate effects.
+
+    Dashed lines = true quotes (converted from IV), solid lines = model predictions.
+    Colours encode maturity T (same as plot_reconstruction).
+    """
+    ctx_max     = dataset.ctx_max
+    n_assets    = dataset.n_assets
+    asset_names = dataset.meta.get("asset_names", [f"asset_{i}" for i in range(n_assets)])
+    feat_names  = dataset.meta.get("query_feat_names", ["lm", "T"])
+
+    qf      = dataset.query_feats[[day_idx]]   # (1, N, Q)
+    qa      = dataset.asset_ids[[day_idx]]     # (1, N)
+    true_iv = dataset.targets[day_idx]         # (N,)
+
+    lm_all = qf[0, :, feat_dim_lm]
+    T_all  = qf[0, :, feat_dim_T]
+    true_call = bs_call_from_iv(true_iv, lm_all, T_all)
+
+    has_quotes = dataset.bid is not None and dataset.ask is not None
+    bid_all = dataset.bid[day_idx]  if has_quotes else None
+    ask_all = dataset.ask[day_idx]  if has_quotes else None
+
+    group_vals = np.unique(qf[0, ctx_max:, feat_dim_T])
+    group_vals = group_vals[group_vals > 0]
+    cmap    = plt.cm.viridis
+    col_map = {v: cmap(i / max(len(group_vals) - 1, 1)) for i, v in enumerate(group_vals)}
+    tgt_mask = np.arange(dataset.n_points) >= ctx_max
+
+    fig, axes = plt.subplots(n_assets, len(ctx_sizes),
+                             figsize=(4.5 * len(ctx_sizes), 3 * n_assets), sharey="row")
+    if n_assets == 1:
+        axes = axes[np.newaxis, :]
+
+    for ci, nc in enumerate(ctx_sizes):
+        perm    = np.random.default_rng(ci).permutation(ctx_max)[:nc]
+        pred_iv = model.predict(
+            qf[:, perm], qa[:, perm],
+            dataset.targets[[day_idx]][:, perm],
+            qf, qa,
+        )[0]
+        pred_call = bs_call_from_iv(pred_iv, lm_all, T_all)
+
+        for a in range(n_assets):
+            ax = axes[a, ci]
+            for gv in group_vals:
+                m = tgt_mask & (qa[0] == a) & (qf[0, :, feat_dim_T] == gv)
+                if m.sum() < 2:
+                    continue
+                order = np.argsort(lm_all[m])
+                x = lm_all[m][order]
+                col = col_map[gv]
+
+                if has_quotes:
+                    bid_v = bid_all[m][order]
+                    ask_v = ask_all[m][order]
+                    valid = np.isfinite(bid_v) & np.isfinite(ask_v)
+                    if valid.any():
+                        ax.fill_between(x[valid], bid_v[valid], ask_v[valid],
+                                        color=col, alpha=0.18, linewidth=0)
+                        ax.scatter(x[valid], bid_v[valid], s=8, color=col,
+                                   marker="v", zorder=3, alpha=0.7)
+                        ax.scatter(x[valid], ask_v[valid], s=8, color=col,
+                                   marker="^", zorder=3, alpha=0.7)
+
+                ax.plot(x, true_call[m][order],  "--", color=col, lw=1.2, alpha=0.6)
+                ax.plot(x, pred_call[m][order],   "-", color=col, lw=1.5)
+
+            if a == 0:
+                ax.set_title(f"n_ctx={nc}", fontsize=9)
+            if ci == 0:
+                ax.set_ylabel(asset_names[a], fontsize=8)
+            ax.set_xlabel(feat_names[feat_dim_lm], fontsize=7)
+            ax.tick_params(labelsize=6)
+
+    bid_ask_note = "  ▼bid  ▲ask (shaded=spread)" if has_quotes else ""
+    fig.suptitle(
+        f"Call price reconstruction — forward-normalised C/F  (dashed=IV-quotes, solid=pred{bid_ask_note})",
+        fontsize=10,
+    )
+    _maybe_save(fig, out_path)
+    return fig
+
+
+def compute_atm_and_skew(model, dataset, indices, target_mat=0.5, dk=0.05, n_ctx=None):
+    """
+    Predict ATM implied vol and skew from the model for each day in `indices`.
+
+    Uses the smooth predicted surface (not raw data), so results are clean even
+    on sparse observation days.
+
+    Returns
+    -------
+    atm_iv : (N, n_assets)  σ at k=0, T=target_mat
+    skew   : (N, n_assets)  ∂σ/∂k|_{k=0} ≈ (σ(+dk) − σ(−dk)) / (2·dk)
+    """
+    n_ctx    = min(n_ctx or dataset.ctx_max, dataset.ctx_max)
+    n_days   = len(indices)
+    n_assets = dataset.n_assets
+
+    z = model.encode_dataset(dataset, indices, n_ctx)  # (N, n_assets, d_latent)
+
+    # Build (3·n_assets) query points: (-dk, 0, +dk) × target_mat × each asset
+    qry_pts, aid_pts = [], []
+    for a in range(n_assets):
+        for lm in (-dk, 0.0, dk):
+            qry_pts.append([lm, float(target_mat)])
+            aid_pts.append(a)
+    qry_pts = np.array(qry_pts, dtype=np.float32)   # (3·n_assets, 2)
+    aid_pts = np.array(aid_pts, dtype=np.int64)      # (3·n_assets,)
+
+    qry_batch  = np.tile(qry_pts[None],  (n_days, 1, 1))  # (N, 3·n_assets, 2)
+    aids_batch = np.tile(aid_pts[None],  (n_days, 1))      # (N, 3·n_assets)
+
+    preds = model.decode_latent(z, qry_batch, aids_batch)  # (N, 3·n_assets)
+    preds = preds.reshape(n_days, n_assets, 3)             # (N, n_assets, {-dk,0,+dk})
+
+    atm_iv = preds[:, :, 1]
+    skew   = (preds[:, :, 2] - preds[:, :, 0]) / (2.0 * dk)
+    return atm_iv, skew
+
+
+def plot_ssr_evolution(
+    model,
+    dataset,
+    val_idx,
+    *,
+    log_fwd=None,
+    target_mat=0.5,
+    dk=0.05,
+    n_ctx=None,
+    asset_names=None,
+    smooth_window=10,
+    out_path=None,
+):
+    """
+    Plot the evolution of ATM vol, skew, and (optionally) Skew Stickiness Ratio
+    over the validation period.
+
+    SSR is defined as  Δσ_ATM / (skew × Δlog F).  It equals 0 in the
+    sticky-strike regime and 1 in the sticky-delta regime.  It is only
+    computed when `log_fwd` is provided.
+
+    Parameters
+    ----------
+    model       : FittedCNP
+    dataset     : SurfaceDataset  (val split used)
+    val_idx     : 1-D int array — indices into dataset for the validation days
+    log_fwd     : (N_val, n_assets) log forward prices for each val day, or None.
+                  Pass ``dataset.meta["log_fwd"][val_idx]`` for GroupTech data.
+    target_mat  : maturity at which ATM vol and skew are evaluated (years)
+    dk          : finite-difference step for skew (log-moneyness units)
+    n_ctx       : context size used when encoding (default: dataset.ctx_max)
+    asset_names : list[str] | None
+    smooth_window : rolling-mean window for the SSR line (set to 1 to disable)
+    out_path    : file path to save, or None
+    """
+    import pandas as pd
+
+    n_assets = dataset.n_assets
+    names    = asset_names or dataset.meta.get("asset_names",
+                                               [f"asset_{i}" for i in range(n_assets)])
+    colors   = plt.cm.tab10(np.linspace(0, 0.9, min(n_assets, 10)))
+
+    # x-axis: use date labels when available
+    raw_dates = dataset.meta.get("dates")
+    if raw_dates is not None:
+        x_labels = [raw_dates[i] for i in val_idx]
+    else:
+        x_labels = None
+    x = np.arange(len(val_idx))
+
+    atm_iv, skew = compute_atm_and_skew(
+        model, dataset, val_idx, target_mat=target_mat, dk=dk, n_ctx=n_ctx
+    )
+
+    has_ssr  = log_fwd is not None
+    n_panels = 3 if has_ssr else 2
+    fig, axes = plt.subplots(n_panels, 1,
+                             figsize=(13, 3.5 * n_panels), sharex=True)
+    if n_panels == 1:
+        axes = [axes]
+
+    def _plot_lines(ax, data, ylabel, hlines=()):
+        for a in range(n_assets):
+            ax.plot(x, data[:, a], color=colors[a % 10], lw=1.5, label=names[a])
+        for yval, ls, label in hlines:
+            ax.axhline(yval, color="k", lw=0.8, ls=ls, alpha=0.5, label=label)
+        ax.set_ylabel(ylabel, fontsize=9)
+        ax.grid(True, alpha=0.25)
+
+    # ── Panel 1: ATM vol ──────────────────────────────────────────────────────
+    _plot_lines(axes[0], atm_iv, f"ATM vol  (T={target_mat})")
+    axes[0].set_title(
+        f"Vol surface dynamics — validation period  (T={target_mat} yr)",
+        fontsize=11,
+    )
+    axes[0].legend(fontsize=7, ncol=min(n_assets, 4), loc="upper right")
+
+    # ── Panel 2: Skew ─────────────────────────────────────────────────────────
+    _plot_lines(axes[1], skew, "Skew  ∂σ/∂k|_{k=0}",
+                hlines=[(0.0, "--", None)])
+
+    # ── Panel 3: SSR (only when log_fwd provided) ────────────────────────────
+    if has_ssr:
+        d_log_f = np.diff(log_fwd,  axis=0)   # (N_val-1, n_assets)
+        d_atm   = np.diff(atm_iv,   axis=0)   # (N_val-1, n_assets)
+        denom   = skew[:-1] * d_log_f
+        ssr_raw = np.where(np.abs(denom) > 1e-5, d_atm / denom, np.nan)
+
+        ax = axes[2]
+        x_mid = x[:-1] + 0.5
+        for a in range(n_assets):
+            s = ssr_raw[:, a]
+            ax.plot(x_mid, s, color=colors[a % 10], lw=0.7, alpha=0.35)
+            s_smooth = (
+                pd.Series(s)
+                .rolling(smooth_window, center=True, min_periods=1)
+                .mean()
+                .values
+            )
+            ax.plot(x_mid, s_smooth, color=colors[a % 10], lw=2.0,
+                    label=names[a])
+
+        ax.axhline(0.0, color="k",    lw=1.0, ls="--", alpha=0.6,
+                   label="sticky-strike (SSR=0)")
+        ax.axhline(1.0, color="grey", lw=1.0, ls="--", alpha=0.6,
+                   label="sticky-delta (SSR=1)")
+        ax.set_ylabel("SSR", fontsize=9)
+        ax.set_ylim(-3, 4)
+        ax.legend(fontsize=7, ncol=min(n_assets + 2, 5), loc="upper right")
+        ax.grid(True, alpha=0.25)
+
+    # ── x-axis ticks ─────────────────────────────────────────────────────────
+    ax_bot = axes[-1]
+    ax_bot.set_xlabel("Validation day", fontsize=9)
+    if x_labels is not None:
+        step = max(1, len(x_labels) // 10)
+        ticks = x[::step]
+        ax_bot.set_xticks(ticks)
+        ax_bot.set_xticklabels(
+            [x_labels[i] for i in ticks], rotation=30, ha="right", fontsize=7
+        )
+
+    fig.tight_layout()
     _maybe_save(fig, out_path)
     return fig
 

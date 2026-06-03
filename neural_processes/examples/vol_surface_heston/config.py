@@ -8,8 +8,8 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 class DataConfig:
     train_path:   str = str(REPO_ROOT / "data" / "synthetic" / "heston_multiasset_training.npz")
     ood_path:     str = str(REPO_ROOT / "data" / "synthetic" / "heston_multiasset_ood_test.npz")
-    n_train_days: int = 500
-    n_val_days:   int = 100
+    n_train_days: int | None = None
+    n_val_days:   int | None = None
 
 
 @dataclass
@@ -28,7 +28,7 @@ class ModelConfig:
 
 @dataclass
 class TrainConfig:
-    n_epochs:   int   = 150
+    n_epochs:   int   = 300
     batch_size: int   = 32
     lr:         float = 3e-4
     ctx_min:    int   = 3

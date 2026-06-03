@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../../../../../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>dgraph.examples.vol_smiles.losses.node &#8212; Volatility Extrapolation  documentation</title>
+    <link rel="stylesheet" type="text/css" href="../../../../../_static/pygments.css?v=5ecbeea2" />
+    <link rel="stylesheet" type="text/css" href="../../../../../_static/basic.css?v=b08954a9" />
+    <link rel="stylesheet" type="text/css" href="../../../../../_static/alabaster.css?v=27fed22d" />
+    <script src="../../../../../_static/documentation_options.js?v=5929fcd5"></script>
+    <script src="../../../../../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../../../../../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <link rel="index" title="Index" href="../../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../../search.html" />
+   
+  <link rel="stylesheet" href="../../../../../_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <h1>Source code for dgraph.examples.vol_smiles.losses.node</h1><div class="highlight"><pre>
+<span></span><span class="kn">from</span><span class="w"> </span><span class="nn">collections</span><span class="w"> </span><span class="kn">import</span> <span class="n">defaultdict</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">dgraph.source.graph</span><span class="w"> </span><span class="kn">import</span> <span class="n">Graph</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">dgraph.losses.node</span><span class="w"> </span><span class="kn">import</span> <span class="n">NodeLoss</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">..source.curves.svi</span><span class="w"> </span><span class="kn">import</span> <span class="n">SviJWState</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">..source.curves.bspline</span><span class="w"> </span><span class="kn">import</span> <span class="n">BSplineState</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">..source.nodes</span><span class="w"> </span><span class="kn">import</span> <span class="n">CurveNode</span>
+
+
+<div class="viewcode-block" id="SviJWNodeLoss">
+<a class="viewcode-back" href="../../../../../api/dgraph.html#dgraph.examples.vol_smiles.losses.node.SviJWNodeLoss">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">SviJWNodeLoss</span><span class="p">(</span><span class="n">NodeLoss</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Smooth soft-constraint penalty for SviJWState parameters.</span>
+
+<span class="sd">    Two constraints that the box bounds alone cannot enforce:</span>
+
+<span class="sd">      1. v_tilde &lt;= v     (minimum variance must not exceed ATM variance)</span>
+<span class="sd">      2. -p &lt; psi &lt; c     (equivalent to ``|d|`` &lt; 1, i.e. valid to_raw() conversion)</span>
+
+<span class="sd">    Both are penalised quadratically so the optimizer retains gradient</span>
+<span class="sd">    information instead of hitting a flat 1e10 wall.  Non-JW nodes are</span>
+<span class="sd">    silently skipped.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">weight</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">1e4</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">weight</span> <span class="o">=</span> <span class="n">weight</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__call__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">graph</span><span class="p">:</span> <span class="n">Graph</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">float</span><span class="p">:</span>
+        <span class="n">total</span> <span class="o">=</span> <span class="mf">0.0</span>
+        <span class="k">for</span> <span class="n">nid</span> <span class="ow">in</span> <span class="n">graph</span><span class="o">.</span><span class="n">node_ids</span><span class="p">():</span>
+            <span class="n">state</span> <span class="o">=</span> <span class="n">graph</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">nid</span><span class="p">)</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">state</span><span class="p">,</span> <span class="n">SviJWState</span><span class="p">):</span>
+                <span class="k">continue</span>
+            <span class="n">params</span> <span class="o">=</span> <span class="p">[</span><span class="n">state</span><span class="o">.</span><span class="n">v</span><span class="p">,</span> <span class="n">state</span><span class="o">.</span><span class="n">psi</span><span class="p">,</span> <span class="n">state</span><span class="o">.</span><span class="n">p</span><span class="p">,</span> <span class="n">state</span><span class="o">.</span><span class="n">c</span><span class="p">,</span> <span class="n">state</span><span class="o">.</span><span class="n">v_tilde</span><span class="p">]</span>
+            <span class="k">if</span> <span class="nb">any</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">isnan</span><span class="p">(</span><span class="n">x</span><span class="p">)</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="n">params</span><span class="p">):</span>
+                <span class="n">total</span> <span class="o">+=</span> <span class="mf">1e6</span>
+                <span class="k">continue</span>
+            <span class="c1"># v_tilde &lt;= v</span>
+            <span class="n">total</span> <span class="o">+=</span> <span class="nb">max</span><span class="p">(</span><span class="n">state</span><span class="o">.</span><span class="n">v_tilde</span> <span class="o">-</span> <span class="n">state</span><span class="o">.</span><span class="n">v</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">)</span> <span class="o">**</span> <span class="mi">2</span>
+            <span class="c1"># -p &lt; psi  (violated when psi &lt;= -p)</span>
+            <span class="n">total</span> <span class="o">+=</span> <span class="nb">max</span><span class="p">(</span><span class="o">-</span><span class="n">state</span><span class="o">.</span><span class="n">p</span> <span class="o">-</span> <span class="n">state</span><span class="o">.</span><span class="n">psi</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">)</span> <span class="o">**</span> <span class="mi">2</span>
+            <span class="c1"># psi &lt; c   (violated when psi &gt;= c)</span>
+            <span class="n">total</span> <span class="o">+=</span> <span class="nb">max</span><span class="p">(</span><span class="n">state</span><span class="o">.</span><span class="n">psi</span> <span class="o">-</span> <span class="n">state</span><span class="o">.</span><span class="n">c</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">)</span> <span class="o">**</span> <span class="mi">2</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">weight</span> <span class="o">*</span> <span class="n">total</span></div>
+
+
+
+<div class="viewcode-block" id="BSplineNALoss">
+<a class="viewcode-back" href="../../../../../api/dgraph.html#dgraph.examples.vol_smiles.losses.node.BSplineNALoss">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">BSplineNALoss</span><span class="p">(</span><span class="n">NodeLoss</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Butterfly no-arbitrage penalty for BSplineState via Durrleman&#39;s condition.</span>
+
+<span class="sd">    Evaluates g(k) = (1 - k·w&#39;/(2w))² - w&#39;²/4·(1/w + 1/4) + w&#39;&#39;/2 on a</span>
+<span class="sd">    uniform grid and penalises regions where g(k) &lt; 0 (non-negative density</span>
+<span class="sd">    violated).  Derivatives are computed via numpy.gradient (finite differences).</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">weight</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">1e4</span><span class="p">,</span> <span class="n">n_grid</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">50</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">weight</span> <span class="o">=</span> <span class="n">weight</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">n_grid</span> <span class="o">=</span> <span class="n">n_grid</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__call__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">graph</span><span class="p">:</span> <span class="n">Graph</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">float</span><span class="p">:</span>
+        <span class="n">total</span> <span class="o">=</span> <span class="mf">0.0</span>
+        <span class="k">for</span> <span class="n">nid</span> <span class="ow">in</span> <span class="n">graph</span><span class="o">.</span><span class="n">node_ids</span><span class="p">():</span>
+            <span class="n">state</span> <span class="o">=</span> <span class="n">graph</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">nid</span><span class="p">)</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">state</span><span class="p">,</span> <span class="n">BSplineState</span><span class="p">):</span>
+                <span class="k">continue</span>
+            <span class="n">k_lo</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">state</span><span class="o">.</span><span class="n">knots</span><span class="p">[</span><span class="n">state</span><span class="o">.</span><span class="n">degree</span><span class="p">])</span>
+            <span class="n">k_hi</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">state</span><span class="o">.</span><span class="n">knots</span><span class="p">[</span><span class="o">-</span><span class="n">state</span><span class="o">.</span><span class="n">degree</span> <span class="o">-</span> <span class="mi">1</span><span class="p">])</span>
+            <span class="k">if</span> <span class="n">k_hi</span> <span class="o">-</span> <span class="n">k_lo</span> <span class="o">&lt;</span> <span class="mf">1e-10</span><span class="p">:</span>
+                <span class="k">continue</span>
+            <span class="n">k</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">linspace</span><span class="p">(</span><span class="n">k_lo</span><span class="p">,</span> <span class="n">k_hi</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">n_grid</span><span class="p">)</span>
+            <span class="n">w</span> <span class="o">=</span> <span class="n">state</span><span class="o">.</span><span class="n">total_variance</span><span class="p">(</span><span class="n">k</span><span class="p">)</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">np</span><span class="o">.</span><span class="n">all</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">isfinite</span><span class="p">(</span><span class="n">w</span><span class="p">)):</span>
+                <span class="n">total</span> <span class="o">+=</span> <span class="mf">1.0</span>
+                <span class="k">continue</span>
+
+            <span class="n">dk</span> <span class="o">=</span> <span class="n">k</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">-</span> <span class="n">k</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+            <span class="n">wp</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">gradient</span><span class="p">(</span><span class="n">w</span><span class="p">,</span> <span class="n">dk</span><span class="p">)</span>
+            <span class="n">wpp</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">gradient</span><span class="p">(</span><span class="n">wp</span><span class="p">,</span> <span class="n">dk</span><span class="p">)</span>
+
+            <span class="n">w_safe</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">maximum</span><span class="p">(</span><span class="n">w</span><span class="p">,</span> <span class="mf">1e-8</span><span class="p">)</span>
+            <span class="n">g</span> <span class="o">=</span> <span class="p">(</span><span class="mf">1.0</span> <span class="o">-</span> <span class="n">k</span> <span class="o">*</span> <span class="n">wp</span> <span class="o">/</span> <span class="p">(</span><span class="mf">2.0</span> <span class="o">*</span> <span class="n">w_safe</span><span class="p">))</span> <span class="o">**</span> <span class="mi">2</span> \
+                <span class="o">-</span> <span class="n">wp</span> <span class="o">**</span> <span class="mi">2</span> <span class="o">/</span> <span class="mf">4.0</span> <span class="o">*</span> <span class="p">(</span><span class="mf">1.0</span> <span class="o">/</span> <span class="n">w_safe</span> <span class="o">+</span> <span class="mf">0.25</span><span class="p">)</span> \
+                <span class="o">+</span> <span class="n">wpp</span> <span class="o">/</span> <span class="mf">2.0</span>
+
+            <span class="n">violations</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">minimum</span><span class="p">(</span><span class="n">g</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">)</span>
+            <span class="n">total</span> <span class="o">+=</span> <span class="nb">float</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">violations</span> <span class="o">**</span> <span class="mi">2</span><span class="p">))</span>
+
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">weight</span> <span class="o">*</span> <span class="n">total</span></div>
+
+
+
+<div class="viewcode-block" id="CalendarSpreadPenalty">
+<a class="viewcode-back" href="../../../../../api/dgraph.html#dgraph.examples.vol_smiles.losses.node.CalendarSpreadPenalty">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">CalendarSpreadPenalty</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Soft calendar-spread no-arbitrage penalty applied to a whole graph.</span>
+
+<span class="sd">    For each pair of consecutive maturities on the same underlying,</span>
+<span class="sd">    penalises any strike where total variance decreases with time::</span>
+
+<span class="sd">        penalty = sum_k max(w(k, T_i) - w(k, T_{i+1}), 0)^2   for T_i &lt; T_{i+1}</span>
+
+<span class="sd">    Not a NodeLoss (which acts per-node); call this directly on the graph</span>
+<span class="sd">    and add to the combined loss manually when needed.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">grid</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">grid</span> <span class="o">=</span> <span class="n">grid</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__call__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">graph</span><span class="p">:</span> <span class="n">Graph</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">float</span><span class="p">:</span>
+        <span class="n">by_underlying</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="n">CurveNode</span><span class="p">]]</span> <span class="o">=</span> <span class="n">defaultdict</span><span class="p">(</span><span class="nb">list</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">nid</span> <span class="ow">in</span> <span class="n">graph</span><span class="o">.</span><span class="n">node_ids</span><span class="p">():</span>
+            <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">nid</span><span class="p">,</span> <span class="n">CurveNode</span><span class="p">):</span>
+                <span class="n">by_underlying</span><span class="p">[</span><span class="n">nid</span><span class="o">.</span><span class="n">underlying</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">nid</span><span class="p">)</span>
+
+        <span class="n">total</span> <span class="o">=</span> <span class="mf">0.0</span>
+        <span class="k">for</span> <span class="n">nodes</span> <span class="ow">in</span> <span class="n">by_underlying</span><span class="o">.</span><span class="n">values</span><span class="p">():</span>
+            <span class="n">nodes_sorted</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">nodes</span><span class="p">,</span> <span class="n">key</span><span class="o">=</span><span class="k">lambda</span> <span class="n">n</span><span class="p">:</span> <span class="n">n</span><span class="o">.</span><span class="n">expiry</span><span class="p">)</span>
+            <span class="k">for</span> <span class="n">n1</span><span class="p">,</span> <span class="n">n2</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">nodes_sorted</span><span class="p">,</span> <span class="n">nodes_sorted</span><span class="p">[</span><span class="mi">1</span><span class="p">:]):</span>
+                <span class="n">w1</span> <span class="o">=</span> <span class="n">graph</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">n1</span><span class="p">)</span><span class="o">.</span><span class="n">total_variance</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">grid</span><span class="p">)</span>
+                <span class="n">w2</span> <span class="o">=</span> <span class="n">graph</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">n2</span><span class="p">)</span><span class="o">.</span><span class="n">total_variance</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">grid</span><span class="p">)</span>
+                <span class="n">violations</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">maximum</span><span class="p">(</span><span class="n">w1</span> <span class="o">-</span> <span class="n">w2</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">)</span>
+                <span class="n">total</span> <span class="o">+=</span> <span class="nb">float</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">violations</span> <span class="o">**</span> <span class="mi">2</span><span class="p">))</span>
+        <span class="k">return</span> <span class="n">total</span></div>
+
+</pre></div>
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../../../index.html">Volatility Extrapolation</a></h1>
+
+
+
+
+
+
+
+
+
+<search id="searchbox" style="display: none" role="search">
+    <div class="searchformwrapper">
+    <form class="search" action="../../../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Search"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script><h3>Navigation</h3>
+<p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../../api/dgraph.html">DGraph</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../../api/neural_processes.html">Neural Processes</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../../api/shared.html">Shared Utilities</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../../api/utils.html">Utils</a></li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../../../../../index.html">Documentation overview</a><ul>
+  <li><a href="../../../../index.html">Module code</a><ul>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;2026, Alvaro Abad.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 9.1.0</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 1.0.0</a>
+      
+    </div>
+
+    
+
+    
+  </body>
+</html>

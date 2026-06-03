@@ -11,13 +11,45 @@ class CurveState(State):
 
     @abstractmethod
     def total_variance(self, k: float | np.ndarray) -> float | np.ndarray:
-        """
-        Use total variance instead of implied volatility SVI outputs this.
+        """TODO.
+
+        Args:
+            k: TODO.
+
+        Returns:
+            TODO.
         """
         ...
 
     def implied_vol(self, k: float | np.ndarray) -> float | np.ndarray:
+        """TODO.
+
+        Args:
+            k: TODO.
+
+        Returns:
+            TODO.
+        """
         return np.sqrt(self.total_variance(k) / self.T)
+
+    def call_price(
+        self,
+        k: float | np.ndarray,
+        forward: float = 1.0,
+        discount: float = 1.0,
+    ) -> np.ndarray:
+        """TODO.
+
+        Args:
+            k: TODO.
+            forward: TODO.
+            discount: TODO.
+
+        Returns:
+            TODO.
+        """
+        from utils.pricing import bs_call_from_iv
+        return bs_call_from_iv(self.implied_vol(k), k, self.T, forward, discount)
 
     def plot(
         self,
@@ -28,8 +60,18 @@ class CurveState(State):
         pct: bool = True,
         **kwargs,
     ):
-        """
-        Plots the implied volatility and adds it to an axis, creates one if no axes given.
+        """TODO.
+
+        Args:
+            k_min: TODO.
+            k_max: TODO.
+            n_points: TODO.
+            ax: TODO.
+            pct: TODO.
+            **kwargs: TODO.
+
+        Returns:
+            TODO.
         """
         import matplotlib.pyplot as plt
 

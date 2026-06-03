@@ -6,6 +6,7 @@ from dgraph.source.graph import Graph
 from dgraph.experiments.comparison import ModelComparison, _node_label
 from dgraph.experiments.splitter import NodeMaskingSplitter
 from dgraph.losses.data import DataLoss
+from utils.pricing import bs_call_from_iv
 
 
 class SmileModelComparison(ModelComparison):
@@ -59,12 +60,30 @@ class SmileModelComparison(ModelComparison):
         for nid in all_nids:
             label = _node_label(nid)
 
-            train_list = [
-                {"k": float(o.data[0]), "iv": float(o.data[1])}
-                for o in self._train_obs.for_node(nid)
-            ]
-            test_list = [
-                {"k": float(o.data[0]), "iv": float(o.data[1])}
+            # Resolve maturity T for this node from the first available model state.
+            T_node = None
+            for _g in self._graphs.values():
+                if nid in _g.nodes:
+                    T_node = float(_g.get(nid).T)
+                    break
+
+            def _obs_dict(o):
+                k_val  = float(o.data[0])
+                iv_val = float(o.data[1])
+                bid_n  = o.data[2] if len(o.data) > 2 else None
+                ask_n  = o.data[3] if len(o.data) > 3 else None
+                d = {"k": k_val, "iv": iv_val}
+                if T_node is not None:
+                    d["call"] = round(float(bs_call_from_iv(iv_val, k_val, T_node)), 7)
+                if bid_n is not None:
+                    d["bid"] = round(float(bid_n), 7)
+                if ask_n is not None:
+                    d["ask"] = round(float(ask_n), 7)
+                return d
+
+            train_list = [_obs_dict(o) for o in self._train_obs.for_node(nid)]
+            test_list  = [
+                _obs_dict(o)
                 for o in self._test_obs.for_node(nid)
                 if id(o) not in train_ids
             ]
@@ -77,10 +96,12 @@ class SmileModelComparison(ModelComparison):
                     continue
                 state = graph.get(nid)
                 try:
-                    iv_grid = np.clip(state.implied_vol(k_grid), 1e-8, None)
+                    iv_grid   = np.clip(state.implied_vol(k_grid), 1e-8, None)
+                    call_grid = state.call_price(k_grid)
                     smile_curves[label][mname] = {
-                        "k_grid":  k_grid.tolist(),
-                        "iv_grid": [round(float(v), 6) for v in iv_grid],
+                        "k_grid":    k_grid.tolist(),
+                        "iv_grid":   [round(float(v), 6) for v in iv_grid],
+                        "call_grid": [round(float(v), 7) for v in call_grid],
                     }
                 except Exception:
                     pass
@@ -151,6 +172,75 @@ function renderSmilePlot(nodeId) {
   }, {responsive: true, displayModeBar: false});
 }
 
+function renderCallPlot(nodeId) {
+  const obs    = D.smile_obs    && D.smile_obs[nodeId]    || {train:[], test:[]};
+  const curves = D.smile_curves && D.smile_curves[nodeId] || {};
+  const traces = [];
+
+  // Helper: filter rows that have a defined field
+  function withField(arr, f) { return arr.filter(o => o[f] !== undefined); }
+
+  // Bid / ask scatter (train)
+  const tBid = withField(obs.train, 'bid');
+  const tAsk = withField(obs.train, 'ask');
+  if (tBid.length > 0) {
+    traces.push({
+      x: tBid.map(o => o.k), y: tBid.map(o => +(o.bid * 100).toFixed(5)),
+      mode: 'markers', name: 'Bid (train)',
+      marker: {symbol: 'triangle-down', size: 7, color: '#1565C0', opacity: 0.75},
+    });
+  }
+  if (tAsk.length > 0) {
+    traces.push({
+      x: tAsk.map(o => o.k), y: tAsk.map(o => +(o.ask * 100).toFixed(5)),
+      mode: 'markers', name: 'Ask (train)',
+      marker: {symbol: 'triangle-up', size: 7, color: '#B71C1C', opacity: 0.75},
+    });
+  }
+
+  // Bid / ask scatter (test / held-out)
+  const eBid = withField(obs.test, 'bid');
+  const eAsk = withField(obs.test, 'ask');
+  if (eBid.length > 0) {
+    traces.push({
+      x: eBid.map(o => o.k), y: eBid.map(o => +(o.bid * 100).toFixed(5)),
+      mode: 'markers', name: 'Bid (test)',
+      marker: {symbol: 'triangle-down-open', size: 9, color: '#0D47A1',
+               line: {color: '#0D47A1', width: 1.5}},
+    });
+  }
+  if (eAsk.length > 0) {
+    traces.push({
+      x: eAsk.map(o => o.k), y: eAsk.map(o => +(o.ask * 100).toFixed(5)),
+      mode: 'markers', name: 'Ask (test)',
+      marker: {symbol: 'triangle-up-open', size: 9, color: '#B71C1C',
+               line: {color: '#B71C1C', width: 1.5}},
+    });
+  }
+
+  // Fitted call price curves
+  D.model_names.forEach((m, i) => {
+    const c = curves[m];
+    if (!c || !c.call_grid) return;
+    traces.push({
+      x: c.k_grid,
+      y: c.call_grid.map(v => +(v * 100).toFixed(5)),
+      mode: 'lines', name: m,
+      line: {color: COLORS[i % COLORS.length], width: 2},
+    });
+  });
+
+  Plotly.react('call-plot-div', traces, {
+    xaxis: {title: 'Log-moneyness', zeroline: true,
+            zerolinecolor: '#ccc', zerolinewidth: 1},
+    yaxis: {title: 'Call Price (% of forward, discount=1)'},
+    legend: {orientation: 'h', y: -0.28, font: {size: 11}},
+    margin: {t: 20, b: 90, l: 65, r: 20},
+    height: 380,
+    plot_bgcolor: '#fafafa',
+  }, {responsive: true, displayModeBar: false});
+}
+
 function renderNodeMetrics(nodeId) {
   const nm = D.node_metrics && D.node_metrics[nodeId];
   if (!nm) return;
@@ -186,8 +276,9 @@ function renderNodeMetrics(nodeId) {
     def _extra_node_html(self) -> str:
         return (
             '<div id="smile-plot-div" style="margin-top:14px;"></div>'
+            '<div id="call-plot-div" style="margin-top:14px;"></div>'
             '<div id="node-metrics-div" style="margin-top:14px;"></div>'
         )
 
     def _extra_init_js(self) -> str:
-        return "renderSmilePlot(nodeId); renderNodeMetrics(nodeId);"
+        return "renderSmilePlot(nodeId); renderCallPlot(nodeId); renderNodeMetrics(nodeId);"

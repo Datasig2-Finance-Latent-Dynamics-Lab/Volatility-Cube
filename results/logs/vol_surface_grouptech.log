@@ -1,0 +1,29 @@
+Loading data...
+  Train: 934  Val: 5  Assets: 8  Points/day (max): 3194
+
+Training...
+Model: 125,873 trainable parameters
+Epoch   10/50  train 0.34222  val 0.32364  161s
+Epoch   20/50  train 0.33278  val 0.32656  333s
+Epoch   30/50  train 0.31578  val 0.31429  509s
+Epoch   40/50  train 0.30898  val 0.29454  689s
+Epoch   50/50  train 0.30827  val 0.35052  869s
+Training done in 869.5s
+
+Analytics...
+Reconstruction plot...
+Call price reconstruction plot...
+RMSE vs context size...
+Results upserted → /home/alvaro/projects/dissertation/results/experiment_results.csv  (1 row(s))
+Per-maturity RMSE...
+Zero-shot test...
+  AAPL: baseline=0.0150  zs=0.0167
+  AMD: baseline=0.0747  zs=0.2059
+  AMZN: baseline=0.0170  zs=0.0245
+  GOOGL: baseline=0.0193  zs=0.0604
+  META: baseline=0.0219  zs=0.0257
+  MSFT: baseline=0.0246  zs=0.0758
+  SPY: baseline=0.0145  zs=0.0483
+  TSLA: baseline=0.0187  zs=0.0618
+
+All outputs saved to: /home/alvaro/projects/dissertation/results/vol_surface_grouptech

@@ -1,5 +1,3 @@
-import time
-
 from scipy.optimize import minimize
 import numpy as np
 
@@ -16,15 +14,9 @@ class GraphUpdater:
     The graph's to_vector / from_vector methods handle flattening and
     reconstruction.
 
-    Note: for separable losses (no GraphLoss) prefer SeparableGraphUpdater,
+    For separable losses (no GraphLoss) prefer SeparableGraphUpdater,
     which solves one n_params-D problem per node instead of one (n_nodes *
     n_params)-D joint problem which is much faster.
-
-    If loss.roller is set and prior_graph is provided, node precisions in the
-    returned graph are initialised from the rolled prior (i.e. decayed) rather
-    than carried over from the initial graph.  If precision_gain is also set,
-    update_node_precision is applied after fitting to accumulate information
-    from the new observations.
     """
 
     def __init__(
@@ -34,14 +26,20 @@ class GraphUpdater:
         bounds=None,
         method: str = "L-BFGS-B",
         precision_gain: float | None = None,
-        verbose: bool = False,
     ):
+        """
+        Args:
+            loss: Combined loss function.
+            roller: Method to roll priors.
+            bounds: Bounds of the state parameters to optimize.
+            method: Method name to minimize.
+            precision_gain: Precision gained from observations at nodes.
+        """
         self.loss = loss
         self.roller = roller
         self.bounds = bounds
         self.method = method
         self.precision_gain = precision_gain
-        self.verbose = verbose
 
     def update(
         self,
@@ -49,58 +47,35 @@ class GraphUpdater:
         observations: ObservationSet,
         prior_graph: Graph | None = None,
     ) -> Graph:
-        # get time increment
+        """TODO.
+
+        Args:
+            graph: Graph to update.
+            observations: New observations.
+            prior_graph: Prior graph.
+
+        Returns:
+            Graph
+        """
         dt: float | None = (
             (observations.date - prior_graph.date).days / 365
             if prior_graph is not None
             else None
         )
 
-        # roll prior
         rolled: Graph | None = None
         if self.roller is not None and prior_graph is not None and dt is not None:
             rolled = self.roller.roll(prior_graph, dt)
 
-        # minimize loss
         x0 = graph.to_vector()
-        n_nodes = len(list(graph.node_ids()))
 
-        if self.verbose:
-            t0 = time.time()
-            iters = 0
-            last_loss = float("inf")
-
-            def objective(v: np.ndarray) -> float:
-                val = self.loss(graph.from_vector(v), observations, rolled)
-                last_loss = val
-                return val
-            
-            # Print time taken per minimize iteration
-            def callback(_):
-                iters += 1
-                elapsed = time.time() - t0
-                print(
-                    f"  iter {iters:4d} | loss {last_loss:.6f}"
-                    f" | {elapsed:.1f}s | {n_nodes} nodes",
-                    end="\r",
-                )
-        else:
-            def objective(v: np.ndarray) -> float:
-                return self.loss(graph.from_vector(v), observations, rolled)
-            callback = None
+        def objective(v: np.ndarray) -> float:
+            return self.loss(graph.from_vector(v), observations, rolled)
 
         bounds = self.bounds if self.bounds is not None else graph.parameter_bounds()
-        result = minimize(objective, x0, method=self.method, bounds=bounds, callback=callback)
-
-        if self.verbose:
-            elapsed = time.time() - t0
-            print(
-                f"  done  {iters[0]:4d} iters | loss {result.fun:.6f}"
-                f" | {elapsed:.1f}s | {n_nodes} nodes"
-            )
+        result = minimize(objective, x0, method=self.method, bounds=bounds)
         fitted = graph.from_vector(result.x)
 
-        # set precision to that of the prior
         if rolled is not None:
             new_nodes = {
                 nid: fitted.get(nid).with_precision(rolled.get(nid).precision)
@@ -109,12 +84,10 @@ class GraphUpdater:
             }
             fitted = Graph(fitted.date, new_nodes, fitted.edges)
 
-        # update precision based on observations
         if self.precision_gain is not None:
             fitted = update_node_precision(fitted, observations, self.precision_gain)
 
         return fitted
-
 
 
 class SeparableGraphUpdater:
@@ -139,6 +112,14 @@ class SeparableGraphUpdater:
         method: str = "L-BFGS-B",
         precision_gain: float | None = None,
     ):
+        """TODO.
+
+        Args:
+            loss: Combined loss function.
+            roller: Method to roll priors.
+            method: Method name to minimize.
+            precision_gain: Precision gained from observations at nodes.
+        """
         self.loss = loss
         self.roller = roller
         self.method = method
@@ -150,6 +131,16 @@ class SeparableGraphUpdater:
         observations: ObservationSet,
         prior_graph: Graph | None = None,
     ) -> Graph:
+        """TODO.
+
+        Args:
+            graph: TODO.
+            observations: TODO.
+            prior_graph: TODO.
+
+        Returns:
+            TODO.
+        """
         dt: float | None = (
             (observations.date - prior_graph.date).days / 365
             if prior_graph is not None
@@ -192,17 +183,21 @@ def update_node_precision(
     observations: ObservationSet,
     c: float,
 ) -> Graph:
-    """
-    Update node precision after fitting based on total observation weight.
+    """Updates precision at each node based on amount of observations at the given node.
 
-    For each node with observations:
-        P_new = P_current + c · (Σ weights) · I
+    Args:
+        graph: Graph to update precisions.
+        observations: New observations.
+        c: How much precision gained from each observation.
+
+    Returns:
+        Graph
     """
     new_nodes: dict = {}
 
     for nid in graph.node_ids():
         state = graph.get(nid)
-        obs_list = observations.for_node(nid) # get observations for each node.
+        obs_list = observations.for_node(nid)
 
         if obs_list:
             total_weight = sum(o.weight for o in obs_list)
@@ -210,7 +205,7 @@ def update_node_precision(
             if isinstance(p, (int, float)):
                 new_precision = p + c * total_weight
             else:
-                new_precision = p + c * total_weight * np.eye(state.n_params) # Assumes that precision only changes diagonal entries.
+                new_precision = p + c * total_weight * np.eye(state.n_params)
             new_nodes[nid] = state.with_precision(new_precision)
         else:
             new_nodes[nid] = state

@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../../../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>neural_processes.analytics.reconstruction &#8212; Volatility Extrapolation  documentation</title>
+    <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=5ecbeea2" />
+    <link rel="stylesheet" type="text/css" href="../../../_static/basic.css?v=b08954a9" />
+    <link rel="stylesheet" type="text/css" href="../../../_static/alabaster.css?v=27fed22d" />
+    <script src="../../../_static/documentation_options.js?v=5929fcd5"></script>
+    <script src="../../../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../../../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <h1>Source code for neural_processes.analytics.reconstruction</h1><div class="highlight"><pre>
+<span></span><span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">matplotlib.pyplot</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">plt</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">neural_processes.data.base</span><span class="w"> </span><span class="kn">import</span> <span class="n">SurfaceDataset</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">utils.pricing</span><span class="w"> </span><span class="kn">import</span> <span class="n">bs_call_from_iv</span>
+
+
+<span class="c1"># ── Evaluation ────────────────────────────────────────────────────────────────</span>
+
+<div class="viewcode-block" id="eval_rmse_vs_ctx">
+<a class="viewcode-back" href="../../../api/neural_processes.html#neural_processes.analytics.reconstruction.eval_rmse_vs_ctx">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">eval_rmse_vs_ctx</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">dataset</span><span class="p">,</span> <span class="n">indices</span><span class="p">,</span> <span class="n">ctx_sizes</span><span class="p">,</span> <span class="n">n_reps</span><span class="o">=</span><span class="mi">8</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    RMSE (original IV units) on the target pool for each context size.</span>
+<span class="sd">    Zero-padded positions (T == 0 in raw query_feats) are excluded from the mean.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">ctx_max</span>   <span class="o">=</span> <span class="n">dataset</span><span class="o">.</span><span class="n">ctx_max</span>
+    <span class="n">rng</span>       <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">default_rng</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+    <span class="c1"># valid mask for target pool: T &gt; 0 (raw, dim 1 of query_feats)</span>
+    <span class="n">valid_tgt</span> <span class="o">=</span> <span class="n">dataset</span><span class="o">.</span><span class="n">query_feats</span><span class="p">[</span><span class="n">indices</span><span class="p">,</span> <span class="n">ctx_max</span><span class="p">:,</span> <span class="mi">1</span><span class="p">]</span> <span class="o">&gt;</span> <span class="mi">0</span>   <span class="c1"># (N, tgt_pool)</span>
+    <span class="n">results</span>   <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">nc</span> <span class="ow">in</span> <span class="n">ctx_sizes</span><span class="p">:</span>
+        <span class="n">nc</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="n">nc</span><span class="p">,</span> <span class="n">ctx_max</span><span class="p">)</span>
+        <span class="n">total_sq</span><span class="p">,</span> <span class="n">total_n</span> <span class="o">=</span> <span class="mf">0.0</span><span class="p">,</span> <span class="mi">0</span>
+        <span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n_reps</span><span class="p">):</span>
+            <span class="n">perm</span> <span class="o">=</span> <span class="n">rng</span><span class="o">.</span><span class="n">permutation</span><span class="p">(</span><span class="n">ctx_max</span><span class="p">)[:</span><span class="n">nc</span><span class="p">]</span>
+            <span class="n">pred</span> <span class="o">=</span> <span class="n">model</span><span class="o">.</span><span class="n">predict</span><span class="p">(</span>
+                <span class="n">dataset</span><span class="o">.</span><span class="n">query_feats</span><span class="p">[</span><span class="n">indices</span><span class="p">][:,</span> <span class="n">perm</span><span class="p">],</span>
+                <span class="n">dataset</span><span class="o">.</span><span class="n">asset_ids</span><span class="p">[</span><span class="n">indices</span><span class="p">][:,</span> <span class="n">perm</span><span class="p">],</span>
+                <span class="n">dataset</span><span class="o">.</span><span class="n">targets</span><span class="p">[</span><span class="n">indices</span><span class="p">][:,</span> <span class="n">perm</span><span class="p">],</span>
+                <span class="n">dataset</span><span class="o">.</span><span class="n">query_feats</span><span class="p">[</span><span class="n">indices</span><span class="p">],</span>
+                <span class="n">dataset</span><span class="o">.</span><span class="n">asset_ids</span><span class="p">[</span><span class="n">indices</span><span class="p">],</span>
+            <span class="p">)</span>
+            <span class="n">true</span>  <span class="o">=</span> <span class="n">dataset</span><span class="o">.</span><span class="n">targets</span><span class="p">[</span><span class="n">indices</span><span class="p">]</span>
+            <span class="n">err2</span>  <span class="o">=</span> <span class="p">(</span><span class="n">pred</span><span class="p">[:,</span> <span class="n">ctx_max</span><span class="p">:]</span> <span class="o">-</span> <span class="n">true</span><span class="p">[:,</span> <span class="n">ctx_max</span><span class="p">:])</span> <span class="o">**</span> <span class="mi">2</span>
+            <span class="n">total_sq</span> <span class="o">+=</span> <span class="nb">float</span><span class="p">((</span><span class="n">err2</span> <span class="o">*</span> <span class="n">valid_tgt</span><span class="p">)</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span>
+            <span class="n">total_n</span>  <span class="o">+=</span> <span class="nb">int</span><span class="p">(</span><span class="n">valid_tgt</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span>
+        <span class="n">results</span><span class="p">[</span><span class="n">nc</span><span class="p">]</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="n">total_sq</span> <span class="o">/</span> <span class="nb">max</span><span class="p">(</span><span class="n">total_n</span><span class="p">,</span> <span class="mi">1</span><span class="p">)))</span>
+    <span class="k">return</span> <span class="n">results</span></div>
+
+
+
+<div class="viewcode-block" id="eval_per_feature_rmse">
+<a class="viewcode-back" href="../../../api/neural_processes.html#neural_processes.analytics.reconstruction.eval_per_feature_rmse">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">eval_per_feature_rmse</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">dataset</span><span class="p">,</span> <span class="n">indices</span><span class="p">,</span> <span class="n">n_ctx</span><span class="o">=</span><span class="mi">100</span><span class="p">,</span> <span class="n">feat_dim</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">n_reps</span><span class="o">=</span><span class="mi">6</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    RMSE broken down by unique values of one query feature (default dim 1 = maturity T).</span>
+<span class="sd">    Zero-padded positions (T == 0) are excluded from both the bucket list and the mean.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">ctx_max</span>     <span class="o">=</span> <span class="n">dataset</span><span class="o">.</span><span class="n">ctx_max</span>
+    <span class="n">rng</span>         <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">default_rng</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+    <span class="c1"># Exclude T=0 bucket (zero-padding artefact)</span>
+    <span class="n">tgt_feat</span>    <span class="o">=</span> <span class="n">dataset</span><span class="o">.</span><span class="n">query_feats</span><span class="p">[</span><span class="n">indices</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">ctx_max</span><span class="p">:,</span> <span class="n">feat_dim</span><span class="p">]</span>
+    <span class="n">unique_vals</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">unique</span><span class="p">(</span><span class="n">tgt_feat</span><span class="p">)</span>
+    <span class="n">unique_vals</span> <span class="o">=</span> <span class="n">unique_vals</span><span class="p">[</span><span class="n">unique_vals</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">]</span>   <span class="c1"># drop zero-padded T=0 bucket</span>
+    <span class="n">sq_by_val</span>   <span class="o">=</span> <span class="p">{</span><span class="n">v</span><span class="p">:</span> <span class="p">[]</span> <span class="k">for</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">unique_vals</span><span class="p">}</span>
+
+    <span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n_reps</span><span class="p">):</span>
+        <span class="n">perm</span>   <span class="o">=</span> <span class="n">rng</span><span class="o">.</span><span class="n">permutation</span><span class="p">(</span><span class="n">ctx_max</span><span class="p">)[:</span><span class="n">n_ctx</span><span class="p">]</span>
+        <span class="n">pred</span>   <span class="o">=</span> <span class="n">model</span><span class="o">.</span><span class="n">predict</span><span class="p">(</span>
+            <span class="n">dataset</span><span class="o">.</span><span class="n">query_feats</span><span class="p">[</span><span class="n">indices</span><span class="p">][:,</span> <span class="n">perm</span><span class="p">],</span>
+            <span class="n">dataset</span><span class="o">.</span><span class="n">asset_ids</span><span class="p">[</span><span class="n">indices</span><span class="p">][:,</span> <span class="n">perm</span><span class="p">],</span>
+            <span class="n">dataset</span><span class="o">.</span><span class="n">targets</span><span class="p">[</span><span class="n">indices</span><span class="p">][:,</span> <span class="n">perm</span><span class="p">],</span>
+            <span class="n">dataset</span><span class="o">.</span><span class="n">query_feats</span><span class="p">[</span><span class="n">indices</span><span class="p">],</span>
+            <span class="n">dataset</span><span class="o">.</span><span class="n">asset_ids</span><span class="p">[</span><span class="n">indices</span><span class="p">],</span>
+        <span class="p">)</span>
+        <span class="n">true</span>   <span class="o">=</span> <span class="n">dataset</span><span class="o">.</span><span class="n">targets</span><span class="p">[</span><span class="n">indices</span><span class="p">]</span>
+        <span class="n">pred_t</span> <span class="o">=</span> <span class="n">pred</span><span class="p">[:,</span> <span class="n">ctx_max</span><span class="p">:]</span>
+        <span class="n">true_t</span> <span class="o">=</span> <span class="n">true</span><span class="p">[:,</span> <span class="n">ctx_max</span><span class="p">:]</span>
+        <span class="n">feat_t</span> <span class="o">=</span> <span class="n">dataset</span><span class="o">.</span><span class="n">query_feats</span><span class="p">[</span><span class="n">indices</span><span class="p">,</span> <span class="n">ctx_max</span><span class="p">:,</span> <span class="n">feat_dim</span><span class="p">]</span>
+        <span class="n">err2</span>   <span class="o">=</span> <span class="p">(</span><span class="n">pred_t</span> <span class="o">-</span> <span class="n">true_t</span><span class="p">)</span> <span class="o">**</span> <span class="mi">2</span>
+        <span class="k">for</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">unique_vals</span><span class="p">:</span>
+            <span class="n">mask</span> <span class="o">=</span> <span class="n">feat_t</span> <span class="o">==</span> <span class="n">v</span>
+            <span class="k">if</span> <span class="n">mask</span><span class="o">.</span><span class="n">any</span><span class="p">():</span>
+                <span class="n">sq_by_val</span><span class="p">[</span><span class="n">v</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">err2</span><span class="p">[</span><span class="n">mask</span><span class="p">]</span><span class="o">.</span><span class="n">mean</span><span class="p">())</span>
+
+    <span class="k">return</span> <span class="p">{</span><span class="nb">float</span><span class="p">(</span><span class="n">v</span><span class="p">):</span> <span class="nb">float</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">sq_by_val</span><span class="p">[</span><span class="n">v</span><span class="p">])))</span>
+            <span class="k">for</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">unique_vals</span> <span class="k">if</span> <span class="n">sq_by_val</span><span class="p">[</span><span class="n">v</span><span class="p">]}</span></div>
+
+
+
+<div class="viewcode-block" id="eval_zeroshot">
+<a class="viewcode-back" href="../../../api/neural_processes.html#neural_processes.analytics.reconstruction.eval_zeroshot">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">eval_zeroshot</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">dataset</span><span class="p">,</span> <span class="n">indices</span><span class="p">,</span> <span class="n">n_ctx</span><span class="o">=</span><span class="mi">50</span><span class="p">,</span> <span class="n">n_reps</span><span class="o">=</span><span class="mi">10</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Per-asset RMSE when context excludes that asset (zero-shot) vs baseline.</span>
+<span class="sd">    Zero-padded positions are excluded via a T &gt; 0 validity mask.</span>
+<span class="sd">    Returns {&#39;baseline&#39;: array(A,), &#39;zeroshot&#39;: array(A,)}.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">ctx_max</span>  <span class="o">=</span> <span class="n">dataset</span><span class="o">.</span><span class="n">ctx_max</span>
+    <span class="n">n_assets</span> <span class="o">=</span> <span class="n">dataset</span><span class="o">.</span><span class="n">n_assets</span>
+    <span class="n">aid_tgt</span>  <span class="o">=</span> <span class="n">dataset</span><span class="o">.</span><span class="n">asset_ids</span><span class="p">[</span><span class="n">indices</span><span class="p">,</span> <span class="n">ctx_max</span><span class="p">:]</span>
+    <span class="c1"># valid mask: exclude padded positions (T=0) from target pool evaluation</span>
+    <span class="n">valid_tgt_pool</span> <span class="o">=</span> <span class="n">dataset</span><span class="o">.</span><span class="n">query_feats</span><span class="p">[</span><span class="n">indices</span><span class="p">,</span> <span class="n">ctx_max</span><span class="p">:,</span> <span class="mi">1</span><span class="p">]</span> <span class="o">&gt;</span> <span class="mi">0</span>   <span class="c1"># (N, tgt_pool)</span>
+    <span class="n">rng</span>      <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">default_rng</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+    <span class="n">baseline</span>  <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="n">n_assets</span><span class="p">)</span>
+    <span class="n">zeroshot</span>  <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="n">n_assets</span><span class="p">)</span>
+
+    <span class="k">for</span> <span class="n">excl</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n_assets</span><span class="p">):</span>
+        <span class="n">pool_aids</span> <span class="o">=</span> <span class="n">dataset</span><span class="o">.</span><span class="n">asset_ids</span><span class="p">[</span><span class="n">indices</span><span class="p">,</span> <span class="p">:</span><span class="n">ctx_max</span><span class="p">]</span>
+        <span class="n">qry_f</span> <span class="o">=</span> <span class="n">dataset</span><span class="o">.</span><span class="n">query_feats</span><span class="p">[</span><span class="n">indices</span><span class="p">]</span>
+        <span class="n">qry_a</span> <span class="o">=</span> <span class="n">dataset</span><span class="o">.</span><span class="n">asset_ids</span><span class="p">[</span><span class="n">indices</span><span class="p">]</span>
+        <span class="n">true</span>  <span class="o">=</span> <span class="n">dataset</span><span class="o">.</span><span class="n">targets</span><span class="p">[</span><span class="n">indices</span><span class="p">]</span>
+        <span class="n">mask</span>  <span class="o">=</span> <span class="p">(</span><span class="n">aid_tgt</span> <span class="o">==</span> <span class="n">excl</span><span class="p">)</span> <span class="o">&amp;</span> <span class="n">valid_tgt_pool</span>   <span class="c1"># (N, tgt_pool)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">mask</span><span class="o">.</span><span class="n">any</span><span class="p">():</span>
+            <span class="k">continue</span>
+
+        <span class="n">sq_zs</span><span class="p">,</span> <span class="n">sq_bl</span> <span class="o">=</span> <span class="p">[],</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n_reps</span><span class="p">):</span>
+            <span class="c1"># zero-shot context (exclude asset excl)</span>
+            <span class="n">obs_f_list</span><span class="p">,</span> <span class="n">obs_a_list</span><span class="p">,</span> <span class="n">obs_t_list</span> <span class="o">=</span> <span class="p">[],</span> <span class="p">[],</span> <span class="p">[]</span>
+            <span class="k">for</span> <span class="n">b</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">indices</span><span class="p">)):</span>
+                <span class="n">avail</span>  <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">pool_aids</span><span class="p">[</span><span class="n">b</span><span class="p">]</span> <span class="o">!=</span> <span class="n">excl</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+                <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">avail</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+                    <span class="n">avail</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="n">ctx_max</span><span class="p">)</span>
+                <span class="n">chosen</span> <span class="o">=</span> <span class="n">avail</span><span class="p">[</span><span class="n">rng</span><span class="o">.</span><span class="n">permutation</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">avail</span><span class="p">))[:</span><span class="n">n_ctx</span><span class="p">]]</span>
+                <span class="n">obs_f_list</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">dataset</span><span class="o">.</span><span class="n">query_feats</span><span class="p">[</span><span class="n">indices</span><span class="p">[</span><span class="n">b</span><span class="p">],</span> <span class="n">chosen</span><span class="p">])</span>
+                <span class="n">obs_a_list</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">dataset</span><span class="o">.</span><span class="n">asset_ids</span><span class="p">[</span><span class="n">indices</span><span class="p">[</span><span class="n">b</span><span class="p">],</span> <span class="n">chosen</span><span class="p">])</span>
+                <span class="n">obs_t_list</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">dataset</span><span class="o">.</span><span class="n">targets</span><span class="p">[</span><span class="n">indices</span><span class="p">[</span><span class="n">b</span><span class="p">],</span> <span class="n">chosen</span><span class="p">])</span>
+            <span class="n">obs_f</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">stack</span><span class="p">(</span><span class="n">obs_f_list</span><span class="p">)</span>
+            <span class="n">obs_a</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">stack</span><span class="p">(</span><span class="n">obs_a_list</span><span class="p">)</span>
+            <span class="n">obs_t</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">stack</span><span class="p">(</span><span class="n">obs_t_list</span><span class="p">)</span>
+
+            <span class="n">pred_zs</span>  <span class="o">=</span> <span class="n">model</span><span class="o">.</span><span class="n">predict</span><span class="p">(</span><span class="n">obs_f</span><span class="p">,</span> <span class="n">obs_a</span><span class="p">,</span> <span class="n">obs_t</span><span class="p">,</span> <span class="n">qry_f</span><span class="p">,</span> <span class="n">qry_a</span><span class="p">)[:,</span> <span class="n">ctx_max</span><span class="p">:]</span>
+            <span class="n">true_tgt</span> <span class="o">=</span> <span class="n">true</span><span class="p">[:,</span> <span class="n">ctx_max</span><span class="p">:]</span>
+            <span class="n">sq_zs</span><span class="o">.</span><span class="n">append</span><span class="p">(((</span><span class="n">pred_zs</span> <span class="o">-</span> <span class="n">true_tgt</span><span class="p">)</span> <span class="o">**</span> <span class="mi">2</span><span class="p">)[</span><span class="n">mask</span><span class="p">]</span><span class="o">.</span><span class="n">mean</span><span class="p">())</span>
+
+            <span class="c1"># baseline context</span>
+            <span class="n">perm_b</span>  <span class="o">=</span> <span class="n">rng</span><span class="o">.</span><span class="n">permutation</span><span class="p">(</span><span class="n">ctx_max</span><span class="p">)[:</span><span class="n">n_ctx</span><span class="p">]</span>
+            <span class="n">pred_bl</span> <span class="o">=</span> <span class="n">model</span><span class="o">.</span><span class="n">predict</span><span class="p">(</span>
+                <span class="n">dataset</span><span class="o">.</span><span class="n">query_feats</span><span class="p">[</span><span class="n">indices</span><span class="p">][:,</span> <span class="n">perm_b</span><span class="p">],</span>
+                <span class="n">dataset</span><span class="o">.</span><span class="n">asset_ids</span><span class="p">[</span><span class="n">indices</span><span class="p">][:,</span> <span class="n">perm_b</span><span class="p">],</span>
+                <span class="n">dataset</span><span class="o">.</span><span class="n">targets</span><span class="p">[</span><span class="n">indices</span><span class="p">][:,</span> <span class="n">perm_b</span><span class="p">],</span>
+                <span class="n">qry_f</span><span class="p">,</span> <span class="n">qry_a</span><span class="p">,</span>
+            <span class="p">)[:,</span> <span class="n">ctx_max</span><span class="p">:]</span>
+            <span class="n">sq_bl</span><span class="o">.</span><span class="n">append</span><span class="p">(((</span><span class="n">pred_bl</span> <span class="o">-</span> <span class="n">true_tgt</span><span class="p">)</span> <span class="o">**</span> <span class="mi">2</span><span class="p">)[</span><span class="n">mask</span><span class="p">]</span><span class="o">.</span><span class="n">mean</span><span class="p">())</span>
+
+        <span class="n">zeroshot</span><span class="p">[</span><span class="n">excl</span><span class="p">]</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">sq_zs</span><span class="p">)))</span>
+        <span class="n">baseline</span><span class="p">[</span><span class="n">excl</span><span class="p">]</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">sq_bl</span><span class="p">)))</span>
+
+    <span class="k">return</span> <span class="p">{</span><span class="s2">&quot;baseline&quot;</span><span class="p">:</span> <span class="n">baseline</span><span class="p">,</span> <span class="s2">&quot;zeroshot&quot;</span><span class="p">:</span> <span class="n">zeroshot</span><span class="p">}</span></div>
+
+
+
+<span class="c1"># ── Plots ─────────────────────────────────────────────────────────────────────</span>
+
+<div class="viewcode-block" id="plot_reconstruction">
+<a class="viewcode-back" href="../../../api/neural_processes.html#neural_processes.analytics.reconstruction.plot_reconstruction">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">plot_reconstruction</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">dataset</span><span class="p">,</span> <span class="n">day_idx</span><span class="p">,</span> <span class="n">ctx_sizes</span><span class="o">=</span><span class="p">(</span><span class="mi">5</span><span class="p">,</span> <span class="mi">20</span><span class="p">,</span> <span class="mi">50</span><span class="p">,</span> <span class="mi">100</span><span class="p">),</span>
+                        <span class="n">feat_dim_x</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">feat_dim_group</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">out_path</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;TODO.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        model: TODO.</span>
+<span class="sd">        dataset: TODO.</span>
+<span class="sd">        day_idx: TODO.</span>
+<span class="sd">        ctx_sizes: TODO.</span>
+<span class="sd">        feat_dim_x: TODO.</span>
+<span class="sd">        feat_dim_group: TODO.</span>
+<span class="sd">        out_path: TODO.</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        TODO.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">ctx_max</span>     <span class="o">=</span> <span class="n">dataset</span><span class="o">.</span><span class="n">ctx_max</span>
+    <span class="n">n_assets</span>    <span class="o">=</span> <span class="n">dataset</span><span class="o">.</span><span class="n">n_assets</span>
+    <span class="n">asset_names</span> <span class="o">=</span> <span class="n">dataset</span><span class="o">.</span><span class="n">meta</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;asset_names&quot;</span><span class="p">,</span> <span class="p">[</span><span class="sa">f</span><span class="s2">&quot;asset_</span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s2">&quot;</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n_assets</span><span class="p">)])</span>
+    <span class="n">feat_names</span>  <span class="o">=</span> <span class="n">dataset</span><span class="o">.</span><span class="n">meta</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;query_feat_names&quot;</span><span class="p">,</span> <span class="p">[</span><span class="s2">&quot;x&quot;</span><span class="p">,</span> <span class="s2">&quot;group&quot;</span><span class="p">])</span>
+    <span class="n">qf</span> <span class="o">=</span> <span class="n">dataset</span><span class="o">.</span><span class="n">query_feats</span><span class="p">[[</span><span class="n">day_idx</span><span class="p">]]</span>
+    <span class="n">qa</span> <span class="o">=</span> <span class="n">dataset</span><span class="o">.</span><span class="n">asset_ids</span><span class="p">[[</span><span class="n">day_idx</span><span class="p">]]</span>
+    <span class="n">true</span> <span class="o">=</span> <span class="n">dataset</span><span class="o">.</span><span class="n">targets</span><span class="p">[</span><span class="n">day_idx</span><span class="p">]</span>
+    <span class="n">group_vals</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">unique</span><span class="p">(</span><span class="n">qf</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="n">ctx_max</span><span class="p">:,</span> <span class="n">feat_dim_group</span><span class="p">])</span>
+    <span class="n">group_vals</span> <span class="o">=</span> <span class="n">group_vals</span><span class="p">[</span><span class="n">group_vals</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">]</span>   <span class="c1"># exclude T=0 padding bucket</span>
+    <span class="n">cmap</span> <span class="o">=</span> <span class="n">plt</span><span class="o">.</span><span class="n">cm</span><span class="o">.</span><span class="n">viridis</span>
+    <span class="n">col_map</span> <span class="o">=</span> <span class="p">{</span><span class="n">v</span><span class="p">:</span> <span class="n">cmap</span><span class="p">(</span><span class="n">i</span> <span class="o">/</span> <span class="nb">max</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">group_vals</span><span class="p">)</span> <span class="o">-</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">))</span> <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">group_vals</span><span class="p">)}</span>
+    <span class="n">tgt_mask</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="n">dataset</span><span class="o">.</span><span class="n">n_points</span><span class="p">)</span> <span class="o">&gt;=</span> <span class="n">ctx_max</span>
+
+    <span class="n">fig</span><span class="p">,</span> <span class="n">axes</span> <span class="o">=</span> <span class="n">plt</span><span class="o">.</span><span class="n">subplots</span><span class="p">(</span><span class="n">n_assets</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">ctx_sizes</span><span class="p">),</span>
+                              <span class="n">figsize</span><span class="o">=</span><span class="p">(</span><span class="mf">4.5</span> <span class="o">*</span> <span class="nb">len</span><span class="p">(</span><span class="n">ctx_sizes</span><span class="p">),</span> <span class="mi">3</span> <span class="o">*</span> <span class="n">n_assets</span><span class="p">),</span> <span class="n">sharey</span><span class="o">=</span><span class="s2">&quot;row&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">n_assets</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span>
+        <span class="n">axes</span> <span class="o">=</span> <span class="n">axes</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">,</span> <span class="p">:]</span>
+
+    <span class="k">for</span> <span class="n">ci</span><span class="p">,</span> <span class="n">nc</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">ctx_sizes</span><span class="p">):</span>
+        <span class="n">perm</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">default_rng</span><span class="p">(</span><span class="n">ci</span><span class="p">)</span><span class="o">.</span><span class="n">permutation</span><span class="p">(</span><span class="n">ctx_max</span><span class="p">)[:</span><span class="n">nc</span><span class="p">]</span>
+        <span class="n">pred</span> <span class="o">=</span> <span class="n">model</span><span class="o">.</span><span class="n">predict</span><span class="p">(</span><span class="n">qf</span><span class="p">[:,</span> <span class="n">perm</span><span class="p">],</span> <span class="n">qa</span><span class="p">[:,</span> <span class="n">perm</span><span class="p">],</span>
+                             <span class="n">dataset</span><span class="o">.</span><span class="n">targets</span><span class="p">[[</span><span class="n">day_idx</span><span class="p">]][:,</span> <span class="n">perm</span><span class="p">],</span> <span class="n">qf</span><span class="p">,</span> <span class="n">qa</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="k">for</span> <span class="n">a</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n_assets</span><span class="p">):</span>
+            <span class="n">ax</span> <span class="o">=</span> <span class="n">axes</span><span class="p">[</span><span class="n">a</span><span class="p">,</span> <span class="n">ci</span><span class="p">]</span>
+            <span class="k">for</span> <span class="n">gv</span> <span class="ow">in</span> <span class="n">group_vals</span><span class="p">:</span>
+                <span class="n">m</span> <span class="o">=</span> <span class="n">tgt_mask</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">qa</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">==</span> <span class="n">a</span><span class="p">)</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">qf</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="p">:,</span> <span class="n">feat_dim_group</span><span class="p">]</span> <span class="o">==</span> <span class="n">gv</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">m</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span> <span class="o">&lt;</span> <span class="mi">2</span><span class="p">:</span>
+                    <span class="k">continue</span>
+                <span class="n">order</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">argsort</span><span class="p">(</span><span class="n">qf</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="n">m</span><span class="p">,</span> <span class="n">feat_dim_x</span><span class="p">])</span>
+                <span class="n">x</span> <span class="o">=</span> <span class="n">qf</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="n">m</span><span class="p">,</span> <span class="n">feat_dim_x</span><span class="p">][</span><span class="n">order</span><span class="p">]</span>
+                <span class="n">ax</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">true</span><span class="p">[</span><span class="n">m</span><span class="p">][</span><span class="n">order</span><span class="p">],</span> <span class="s2">&quot;--&quot;</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="n">col_map</span><span class="p">[</span><span class="n">gv</span><span class="p">],</span> <span class="n">lw</span><span class="o">=</span><span class="mf">1.2</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">0.6</span><span class="p">)</span>
+                <span class="n">ax</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">pred</span><span class="p">[</span><span class="n">m</span><span class="p">][</span><span class="n">order</span><span class="p">],</span>  <span class="s2">&quot;-&quot;</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="n">col_map</span><span class="p">[</span><span class="n">gv</span><span class="p">],</span> <span class="n">lw</span><span class="o">=</span><span class="mf">1.5</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">a</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="n">ax</span><span class="o">.</span><span class="n">set_title</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;n_ctx=</span><span class="si">{</span><span class="n">nc</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">fontsize</span><span class="o">=</span><span class="mi">9</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">ci</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="n">ax</span><span class="o">.</span><span class="n">set_ylabel</span><span class="p">(</span><span class="n">asset_names</span><span class="p">[</span><span class="n">a</span><span class="p">],</span> <span class="n">fontsize</span><span class="o">=</span><span class="mi">8</span><span class="p">)</span>
+            <span class="n">ax</span><span class="o">.</span><span class="n">set_xlabel</span><span class="p">(</span><span class="n">feat_names</span><span class="p">[</span><span class="n">feat_dim_x</span><span class="p">],</span> <span class="n">fontsize</span><span class="o">=</span><span class="mi">7</span><span class="p">)</span>
+            <span class="n">ax</span><span class="o">.</span><span class="n">tick_params</span><span class="p">(</span><span class="n">labelsize</span><span class="o">=</span><span class="mi">6</span><span class="p">)</span>
+
+    <span class="n">fig</span><span class="o">.</span><span class="n">suptitle</span><span class="p">(</span><span class="s2">&quot;Target-pool reconstruction  (dashed=true, solid=pred)&quot;</span><span class="p">,</span> <span class="n">fontsize</span><span class="o">=</span><span class="mi">11</span><span class="p">)</span>
+    <span class="n">_maybe_save</span><span class="p">(</span><span class="n">fig</span><span class="p">,</span> <span class="n">out_path</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">fig</span></div>
+
+
+
+<div class="viewcode-block" id="plot_rmse_vs_ctx">
+<a class="viewcode-back" href="../../../api/neural_processes.html#neural_processes.analytics.reconstruction.plot_rmse_vs_ctx">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">plot_rmse_vs_ctx</span><span class="p">(</span><span class="n">val_rmse</span><span class="p">,</span> <span class="n">ood_rmse</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">out_path</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;TODO.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        val_rmse: TODO.</span>
+<span class="sd">        ood_rmse: TODO.</span>
+<span class="sd">        out_path: TODO.</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        TODO.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">fig</span><span class="p">,</span> <span class="n">ax</span> <span class="o">=</span> <span class="n">plt</span><span class="o">.</span><span class="n">subplots</span><span class="p">(</span><span class="n">figsize</span><span class="o">=</span><span class="p">(</span><span class="mi">7</span><span class="p">,</span> <span class="mi">4</span><span class="p">))</span>
+    <span class="n">ctx</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">val_rmse</span><span class="p">)</span>
+    <span class="n">ax</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">ctx</span><span class="p">,</span> <span class="p">[</span><span class="n">val_rmse</span><span class="p">[</span><span class="n">c</span><span class="p">]</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">ctx</span><span class="p">],</span> <span class="s2">&quot;o-&quot;</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="s2">&quot;Val&quot;</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s2">&quot;C0&quot;</span><span class="p">,</span> <span class="n">lw</span><span class="o">=</span><span class="mi">2</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">ood_rmse</span><span class="p">:</span>
+        <span class="n">ax</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">ctx</span><span class="p">,</span> <span class="p">[</span><span class="n">ood_rmse</span><span class="p">[</span><span class="n">c</span><span class="p">]</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">ctx</span><span class="p">],</span> <span class="s2">&quot;s--&quot;</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="s2">&quot;OOD&quot;</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s2">&quot;C3&quot;</span><span class="p">,</span> <span class="n">lw</span><span class="o">=</span><span class="mi">2</span><span class="p">)</span>
+    <span class="n">ax</span><span class="o">.</span><span class="n">set_xlabel</span><span class="p">(</span><span class="s2">&quot;Context size&quot;</span><span class="p">);</span> <span class="n">ax</span><span class="o">.</span><span class="n">set_ylabel</span><span class="p">(</span><span class="s2">&quot;RMSE (IV units)&quot;</span><span class="p">)</span>
+    <span class="n">ax</span><span class="o">.</span><span class="n">set_xscale</span><span class="p">(</span><span class="s2">&quot;log&quot;</span><span class="p">);</span> <span class="n">ax</span><span class="o">.</span><span class="n">legend</span><span class="p">();</span> <span class="n">ax</span><span class="o">.</span><span class="n">set_title</span><span class="p">(</span><span class="s2">&quot;RMSE vs context size&quot;</span><span class="p">)</span>
+    <span class="n">_maybe_save</span><span class="p">(</span><span class="n">fig</span><span class="p">,</span> <span class="n">out_path</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">fig</span></div>
+
+
+
+<div class="viewcode-block" id="plot_per_feature_rmse">
+<a class="viewcode-back" href="../../../api/neural_processes.html#neural_processes.analytics.reconstruction.plot_per_feature_rmse">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">plot_per_feature_rmse</span><span class="p">(</span><span class="n">rmse_by_val</span><span class="p">,</span> <span class="n">feat_name</span><span class="o">=</span><span class="s2">&quot;maturity&quot;</span><span class="p">,</span> <span class="n">n_ctx</span><span class="o">=</span><span class="mi">100</span><span class="p">,</span> <span class="n">out_path</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;TODO.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        rmse_by_val: TODO.</span>
+<span class="sd">        feat_name: TODO.</span>
+<span class="sd">        n_ctx: TODO.</span>
+<span class="sd">        out_path: TODO.</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        TODO.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">vals</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">rmse_by_val</span><span class="p">)</span>
+    <span class="n">rmse</span> <span class="o">=</span> <span class="p">[</span><span class="n">rmse_by_val</span><span class="p">[</span><span class="n">v</span><span class="p">]</span> <span class="k">for</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">vals</span><span class="p">]</span>
+    <span class="n">fig</span><span class="p">,</span> <span class="n">ax</span> <span class="o">=</span> <span class="n">plt</span><span class="o">.</span><span class="n">subplots</span><span class="p">(</span><span class="n">figsize</span><span class="o">=</span><span class="p">(</span><span class="mi">9</span><span class="p">,</span> <span class="mi">4</span><span class="p">))</span>
+    <span class="n">bars</span> <span class="o">=</span> <span class="n">ax</span><span class="o">.</span><span class="n">bar</span><span class="p">(</span><span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">vals</span><span class="p">)),</span> <span class="n">rmse</span><span class="p">,</span>
+                  <span class="n">color</span><span class="o">=</span><span class="n">plt</span><span class="o">.</span><span class="n">cm</span><span class="o">.</span><span class="n">plasma</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">linspace</span><span class="p">(</span><span class="mf">0.1</span><span class="p">,</span> <span class="mf">0.9</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">vals</span><span class="p">))))</span>
+    <span class="n">ax</span><span class="o">.</span><span class="n">set_xticks</span><span class="p">(</span><span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">vals</span><span class="p">)))</span>
+    <span class="n">ax</span><span class="o">.</span><span class="n">set_xticklabels</span><span class="p">([</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">v</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2">&quot;</span> <span class="k">for</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">vals</span><span class="p">],</span> <span class="n">fontsize</span><span class="o">=</span><span class="mi">9</span><span class="p">)</span>
+    <span class="n">ax</span><span class="o">.</span><span class="n">set_xlabel</span><span class="p">(</span><span class="n">feat_name</span><span class="p">);</span> <span class="n">ax</span><span class="o">.</span><span class="n">set_ylabel</span><span class="p">(</span><span class="s2">&quot;RMSE (IV units)&quot;</span><span class="p">)</span>
+    <span class="n">ax</span><span class="o">.</span><span class="n">set_title</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Per-</span><span class="si">{</span><span class="n">feat_name</span><span class="si">}</span><span class="s2"> RMSE  (n_ctx=</span><span class="si">{</span><span class="n">n_ctx</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">bar</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">bars</span><span class="p">,</span> <span class="n">rmse</span><span class="p">):</span>
+        <span class="n">ax</span><span class="o">.</span><span class="n">text</span><span class="p">(</span><span class="n">bar</span><span class="o">.</span><span class="n">get_x</span><span class="p">()</span> <span class="o">+</span> <span class="n">bar</span><span class="o">.</span><span class="n">get_width</span><span class="p">()</span> <span class="o">/</span> <span class="mi">2</span><span class="p">,</span> <span class="n">bar</span><span class="o">.</span><span class="n">get_height</span><span class="p">(),</span>
+                <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">v</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">ha</span><span class="o">=</span><span class="s2">&quot;center&quot;</span><span class="p">,</span> <span class="n">va</span><span class="o">=</span><span class="s2">&quot;bottom&quot;</span><span class="p">,</span> <span class="n">fontsize</span><span class="o">=</span><span class="mi">7</span><span class="p">)</span>
+    <span class="n">_maybe_save</span><span class="p">(</span><span class="n">fig</span><span class="p">,</span> <span class="n">out_path</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">fig</span></div>
+
+
+
+<div class="viewcode-block" id="plot_zeroshot">
+<a class="viewcode-back" href="../../../api/neural_processes.html#neural_processes.analytics.reconstruction.plot_zeroshot">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">plot_zeroshot</span><span class="p">(</span><span class="n">results</span><span class="p">,</span> <span class="n">asset_names</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">n_ctx</span><span class="o">=</span><span class="mi">50</span><span class="p">,</span> <span class="n">out_path</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;TODO.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        results: TODO.</span>
+<span class="sd">        asset_names: TODO.</span>
+<span class="sd">        n_ctx: TODO.</span>
+<span class="sd">        out_path: TODO.</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        TODO.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">n_assets</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">results</span><span class="p">[</span><span class="s2">&quot;baseline&quot;</span><span class="p">])</span>
+    <span class="n">names</span>    <span class="o">=</span> <span class="n">asset_names</span> <span class="ow">or</span> <span class="p">[</span><span class="sa">f</span><span class="s2">&quot;asset_</span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s2">&quot;</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n_assets</span><span class="p">)]</span>
+    <span class="n">x</span>        <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="n">n_assets</span><span class="p">)</span>
+    <span class="n">fig</span><span class="p">,</span> <span class="n">ax</span>  <span class="o">=</span> <span class="n">plt</span><span class="o">.</span><span class="n">subplots</span><span class="p">(</span><span class="n">figsize</span><span class="o">=</span><span class="p">(</span><span class="mi">9</span><span class="p">,</span> <span class="mi">5</span><span class="p">))</span>
+    <span class="n">ax</span><span class="o">.</span><span class="n">bar</span><span class="p">(</span><span class="n">x</span> <span class="o">-</span> <span class="mf">0.18</span><span class="p">,</span> <span class="n">results</span><span class="p">[</span><span class="s2">&quot;baseline&quot;</span><span class="p">],</span> <span class="mf">0.35</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="sa">f</span><span class="s2">&quot;Baseline (n_ctx=</span><span class="si">{</span><span class="n">n_ctx</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">,</span>
+           <span class="n">color</span><span class="o">=</span><span class="s2">&quot;C0&quot;</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">0.85</span><span class="p">)</span>
+    <span class="n">ax</span><span class="o">.</span><span class="n">bar</span><span class="p">(</span><span class="n">x</span> <span class="o">+</span> <span class="mf">0.18</span><span class="p">,</span> <span class="n">results</span><span class="p">[</span><span class="s2">&quot;zeroshot&quot;</span><span class="p">],</span>  <span class="mf">0.35</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="s2">&quot;Zero-shot (exclude asset)&quot;</span><span class="p">,</span>
+           <span class="n">color</span><span class="o">=</span><span class="s2">&quot;C3&quot;</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">0.85</span><span class="p">)</span>
+    <span class="n">ax</span><span class="o">.</span><span class="n">set_xticks</span><span class="p">(</span><span class="n">x</span><span class="p">);</span> <span class="n">ax</span><span class="o">.</span><span class="n">set_xticklabels</span><span class="p">([</span><span class="sa">f</span><span class="s2">&quot;Excl:</span><span class="se">\n</span><span class="si">{</span><span class="n">n</span><span class="si">}</span><span class="s2">&quot;</span> <span class="k">for</span> <span class="n">n</span> <span class="ow">in</span> <span class="n">names</span><span class="p">])</span>
+    <span class="n">ax</span><span class="o">.</span><span class="n">set_ylabel</span><span class="p">(</span><span class="s2">&quot;RMSE on excluded asset (IV units)&quot;</span><span class="p">)</span>
+    <span class="n">ax</span><span class="o">.</span><span class="n">set_title</span><span class="p">(</span><span class="s2">&quot;Zero-Shot Asset Reconstruction&quot;</span><span class="p">)</span>
+    <span class="n">ax</span><span class="o">.</span><span class="n">legend</span><span class="p">()</span>
+    <span class="n">_maybe_save</span><span class="p">(</span><span class="n">fig</span><span class="p">,</span> <span class="n">out_path</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">fig</span></div>
+
+
+
+<div class="viewcode-block" id="plot_call_reconstruction">
+<a class="viewcode-back" href="../../../api/neural_processes.html#neural_processes.analytics.reconstruction.plot_call_reconstruction">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">plot_call_reconstruction</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">dataset</span><span class="p">,</span> <span class="n">day_idx</span><span class="p">,</span> <span class="n">ctx_sizes</span><span class="o">=</span><span class="p">(</span><span class="mi">5</span><span class="p">,</span> <span class="mi">20</span><span class="p">,</span> <span class="mi">50</span><span class="p">,</span> <span class="mi">100</span><span class="p">),</span>
+                             <span class="n">feat_dim_lm</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">feat_dim_T</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">out_path</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Like plot_reconstruction but in forward-normalised call-price space.</span>
+
+<span class="sd">    Call prices are computed as bs_call_from_iv(iv, lm, T, forward=1, discount=1),</span>
+<span class="sd">    giving C / (F * discount) — a purely (iv, lm, T)-driven quantity that strips</span>
+<span class="sd">    out the absolute forward level and interest-rate effects.</span>
+
+<span class="sd">    Dashed lines = true quotes (converted from IV), solid lines = model predictions.</span>
+<span class="sd">    Colours encode maturity T (same as plot_reconstruction).</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">ctx_max</span>     <span class="o">=</span> <span class="n">dataset</span><span class="o">.</span><span class="n">ctx_max</span>
+    <span class="n">n_assets</span>    <span class="o">=</span> <span class="n">dataset</span><span class="o">.</span><span class="n">n_assets</span>
+    <span class="n">asset_names</span> <span class="o">=</span> <span class="n">dataset</span><span class="o">.</span><span class="n">meta</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;asset_names&quot;</span><span class="p">,</span> <span class="p">[</span><span class="sa">f</span><span class="s2">&quot;asset_</span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s2">&quot;</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n_assets</span><span class="p">)])</span>
+    <span class="n">feat_names</span>  <span class="o">=</span> <span class="n">dataset</span><span class="o">.</span><span class="n">meta</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;query_feat_names&quot;</span><span class="p">,</span> <span class="p">[</span><span class="s2">&quot;lm&quot;</span><span class="p">,</span> <span class="s2">&quot;T&quot;</span><span class="p">])</span>
+
+    <span class="n">qf</span>      <span class="o">=</span> <span class="n">dataset</span><span class="o">.</span><span class="n">query_feats</span><span class="p">[[</span><span class="n">day_idx</span><span class="p">]]</span>   <span class="c1"># (1, N, Q)</span>
+    <span class="n">qa</span>      <span class="o">=</span> <span class="n">dataset</span><span class="o">.</span><span class="n">asset_ids</span><span class="p">[[</span><span class="n">day_idx</span><span class="p">]]</span>     <span class="c1"># (1, N)</span>
+    <span class="n">true_iv</span> <span class="o">=</span> <span class="n">dataset</span><span class="o">.</span><span class="n">targets</span><span class="p">[</span><span class="n">day_idx</span><span class="p">]</span>         <span class="c1"># (N,)</span>
+
+    <span class="n">lm_all</span> <span class="o">=</span> <span class="n">qf</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="p">:,</span> <span class="n">feat_dim_lm</span><span class="p">]</span>
+    <span class="n">T_all</span>  <span class="o">=</span> <span class="n">qf</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="p">:,</span> <span class="n">feat_dim_T</span><span class="p">]</span>
+    <span class="n">true_call</span> <span class="o">=</span> <span class="n">bs_call_from_iv</span><span class="p">(</span><span class="n">true_iv</span><span class="p">,</span> <span class="n">lm_all</span><span class="p">,</span> <span class="n">T_all</span><span class="p">)</span>
+
+    <span class="n">has_quotes</span> <span class="o">=</span> <span class="n">dataset</span><span class="o">.</span><span class="n">bid</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">dataset</span><span class="o">.</span><span class="n">ask</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span>
+    <span class="n">bid_all</span> <span class="o">=</span> <span class="n">dataset</span><span class="o">.</span><span class="n">bid</span><span class="p">[</span><span class="n">day_idx</span><span class="p">]</span>  <span class="k">if</span> <span class="n">has_quotes</span> <span class="k">else</span> <span class="kc">None</span>
+    <span class="n">ask_all</span> <span class="o">=</span> <span class="n">dataset</span><span class="o">.</span><span class="n">ask</span><span class="p">[</span><span class="n">day_idx</span><span class="p">]</span>  <span class="k">if</span> <span class="n">has_quotes</span> <span class="k">else</span> <span class="kc">None</span>
+
+    <span class="n">group_vals</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">unique</span><span class="p">(</span><span class="n">qf</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="n">ctx_max</span><span class="p">:,</span> <span class="n">feat_dim_T</span><span class="p">])</span>
+    <span class="n">group_vals</span> <span class="o">=</span> <span class="n">group_vals</span><span class="p">[</span><span class="n">group_vals</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">]</span>
+    <span class="n">cmap</span>    <span class="o">=</span> <span class="n">plt</span><span class="o">.</span><span class="n">cm</span><span class="o">.</span><span class="n">viridis</span>
+    <span class="n">col_map</span> <span class="o">=</span> <span class="p">{</span><span class="n">v</span><span class="p">:</span> <span class="n">cmap</span><span class="p">(</span><span class="n">i</span> <span class="o">/</span> <span class="nb">max</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">group_vals</span><span class="p">)</span> <span class="o">-</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">))</span> <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">group_vals</span><span class="p">)}</span>
+    <span class="n">tgt_mask</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="n">dataset</span><span class="o">.</span><span class="n">n_points</span><span class="p">)</span> <span class="o">&gt;=</span> <span class="n">ctx_max</span>
+
+    <span class="n">fig</span><span class="p">,</span> <span class="n">axes</span> <span class="o">=</span> <span class="n">plt</span><span class="o">.</span><span class="n">subplots</span><span class="p">(</span><span class="n">n_assets</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">ctx_sizes</span><span class="p">),</span>
+                             <span class="n">figsize</span><span class="o">=</span><span class="p">(</span><span class="mf">4.5</span> <span class="o">*</span> <span class="nb">len</span><span class="p">(</span><span class="n">ctx_sizes</span><span class="p">),</span> <span class="mi">3</span> <span class="o">*</span> <span class="n">n_assets</span><span class="p">),</span> <span class="n">sharey</span><span class="o">=</span><span class="s2">&quot;row&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">n_assets</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span>
+        <span class="n">axes</span> <span class="o">=</span> <span class="n">axes</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">,</span> <span class="p">:]</span>
+
+    <span class="k">for</span> <span class="n">ci</span><span class="p">,</span> <span class="n">nc</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">ctx_sizes</span><span class="p">):</span>
+        <span class="n">perm</span>    <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">default_rng</span><span class="p">(</span><span class="n">ci</span><span class="p">)</span><span class="o">.</span><span class="n">permutation</span><span class="p">(</span><span class="n">ctx_max</span><span class="p">)[:</span><span class="n">nc</span><span class="p">]</span>
+        <span class="n">pred_iv</span> <span class="o">=</span> <span class="n">model</span><span class="o">.</span><span class="n">predict</span><span class="p">(</span>
+            <span class="n">qf</span><span class="p">[:,</span> <span class="n">perm</span><span class="p">],</span> <span class="n">qa</span><span class="p">[:,</span> <span class="n">perm</span><span class="p">],</span>
+            <span class="n">dataset</span><span class="o">.</span><span class="n">targets</span><span class="p">[[</span><span class="n">day_idx</span><span class="p">]][:,</span> <span class="n">perm</span><span class="p">],</span>
+            <span class="n">qf</span><span class="p">,</span> <span class="n">qa</span><span class="p">,</span>
+        <span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="n">pred_call</span> <span class="o">=</span> <span class="n">bs_call_from_iv</span><span class="p">(</span><span class="n">pred_iv</span><span class="p">,</span> <span class="n">lm_all</span><span class="p">,</span> <span class="n">T_all</span><span class="p">)</span>
+
+        <span class="k">for</span> <span class="n">a</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n_assets</span><span class="p">):</span>
+            <span class="n">ax</span> <span class="o">=</span> <span class="n">axes</span><span class="p">[</span><span class="n">a</span><span class="p">,</span> <span class="n">ci</span><span class="p">]</span>
+            <span class="k">for</span> <span class="n">gv</span> <span class="ow">in</span> <span class="n">group_vals</span><span class="p">:</span>
+                <span class="n">m</span> <span class="o">=</span> <span class="n">tgt_mask</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">qa</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">==</span> <span class="n">a</span><span class="p">)</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">qf</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="p">:,</span> <span class="n">feat_dim_T</span><span class="p">]</span> <span class="o">==</span> <span class="n">gv</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">m</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span> <span class="o">&lt;</span> <span class="mi">2</span><span class="p">:</span>
+                    <span class="k">continue</span>
+                <span class="n">order</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">argsort</span><span class="p">(</span><span class="n">lm_all</span><span class="p">[</span><span class="n">m</span><span class="p">])</span>
+                <span class="n">x</span> <span class="o">=</span> <span class="n">lm_all</span><span class="p">[</span><span class="n">m</span><span class="p">][</span><span class="n">order</span><span class="p">]</span>
+                <span class="n">col</span> <span class="o">=</span> <span class="n">col_map</span><span class="p">[</span><span class="n">gv</span><span class="p">]</span>
+
+                <span class="k">if</span> <span class="n">has_quotes</span><span class="p">:</span>
+                    <span class="n">bid_v</span> <span class="o">=</span> <span class="n">bid_all</span><span class="p">[</span><span class="n">m</span><span class="p">][</span><span class="n">order</span><span class="p">]</span>
+                    <span class="n">ask_v</span> <span class="o">=</span> <span class="n">ask_all</span><span class="p">[</span><span class="n">m</span><span class="p">][</span><span class="n">order</span><span class="p">]</span>
+                    <span class="n">valid</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">isfinite</span><span class="p">(</span><span class="n">bid_v</span><span class="p">)</span> <span class="o">&amp;</span> <span class="n">np</span><span class="o">.</span><span class="n">isfinite</span><span class="p">(</span><span class="n">ask_v</span><span class="p">)</span>
+                    <span class="k">if</span> <span class="n">valid</span><span class="o">.</span><span class="n">any</span><span class="p">():</span>
+                        <span class="n">ax</span><span class="o">.</span><span class="n">fill_between</span><span class="p">(</span><span class="n">x</span><span class="p">[</span><span class="n">valid</span><span class="p">],</span> <span class="n">bid_v</span><span class="p">[</span><span class="n">valid</span><span class="p">],</span> <span class="n">ask_v</span><span class="p">[</span><span class="n">valid</span><span class="p">],</span>
+                                        <span class="n">color</span><span class="o">=</span><span class="n">col</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">0.18</span><span class="p">,</span> <span class="n">linewidth</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+                        <span class="n">ax</span><span class="o">.</span><span class="n">scatter</span><span class="p">(</span><span class="n">x</span><span class="p">[</span><span class="n">valid</span><span class="p">],</span> <span class="n">bid_v</span><span class="p">[</span><span class="n">valid</span><span class="p">],</span> <span class="n">s</span><span class="o">=</span><span class="mi">8</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="n">col</span><span class="p">,</span>
+                                   <span class="n">marker</span><span class="o">=</span><span class="s2">&quot;v&quot;</span><span class="p">,</span> <span class="n">zorder</span><span class="o">=</span><span class="mi">3</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">0.7</span><span class="p">)</span>
+                        <span class="n">ax</span><span class="o">.</span><span class="n">scatter</span><span class="p">(</span><span class="n">x</span><span class="p">[</span><span class="n">valid</span><span class="p">],</span> <span class="n">ask_v</span><span class="p">[</span><span class="n">valid</span><span class="p">],</span> <span class="n">s</span><span class="o">=</span><span class="mi">8</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="n">col</span><span class="p">,</span>
+                                   <span class="n">marker</span><span class="o">=</span><span class="s2">&quot;^&quot;</span><span class="p">,</span> <span class="n">zorder</span><span class="o">=</span><span class="mi">3</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">0.7</span><span class="p">)</span>
+
+                <span class="n">ax</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">true_call</span><span class="p">[</span><span class="n">m</span><span class="p">][</span><span class="n">order</span><span class="p">],</span>  <span class="s2">&quot;--&quot;</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="n">col</span><span class="p">,</span> <span class="n">lw</span><span class="o">=</span><span class="mf">1.2</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">0.6</span><span class="p">)</span>
+                <span class="n">ax</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">pred_call</span><span class="p">[</span><span class="n">m</span><span class="p">][</span><span class="n">order</span><span class="p">],</span>   <span class="s2">&quot;-&quot;</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="n">col</span><span class="p">,</span> <span class="n">lw</span><span class="o">=</span><span class="mf">1.5</span><span class="p">)</span>
+
+            <span class="k">if</span> <span class="n">a</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="n">ax</span><span class="o">.</span><span class="n">set_title</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;n_ctx=</span><span class="si">{</span><span class="n">nc</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">fontsize</span><span class="o">=</span><span class="mi">9</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">ci</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="n">ax</span><span class="o">.</span><span class="n">set_ylabel</span><span class="p">(</span><span class="n">asset_names</span><span class="p">[</span><span class="n">a</span><span class="p">],</span> <span class="n">fontsize</span><span class="o">=</span><span class="mi">8</span><span class="p">)</span>
+            <span class="n">ax</span><span class="o">.</span><span class="n">set_xlabel</span><span class="p">(</span><span class="n">feat_names</span><span class="p">[</span><span class="n">feat_dim_lm</span><span class="p">],</span> <span class="n">fontsize</span><span class="o">=</span><span class="mi">7</span><span class="p">)</span>
+            <span class="n">ax</span><span class="o">.</span><span class="n">tick_params</span><span class="p">(</span><span class="n">labelsize</span><span class="o">=</span><span class="mi">6</span><span class="p">)</span>
+
+    <span class="n">bid_ask_note</span> <span class="o">=</span> <span class="s2">&quot;  ▼bid  ▲ask (shaded=spread)&quot;</span> <span class="k">if</span> <span class="n">has_quotes</span> <span class="k">else</span> <span class="s2">&quot;&quot;</span>
+    <span class="n">fig</span><span class="o">.</span><span class="n">suptitle</span><span class="p">(</span>
+        <span class="sa">f</span><span class="s2">&quot;Call price reconstruction — forward-normalised C/F  (dashed=IV-quotes, solid=pred</span><span class="si">{</span><span class="n">bid_ask_note</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">,</span>
+        <span class="n">fontsize</span><span class="o">=</span><span class="mi">10</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="n">_maybe_save</span><span class="p">(</span><span class="n">fig</span><span class="p">,</span> <span class="n">out_path</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">fig</span></div>
+
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_maybe_save</span><span class="p">(</span><span class="n">fig</span><span class="p">,</span> <span class="n">path</span><span class="p">):</span>
+    <span class="k">if</span> <span class="n">path</span><span class="p">:</span>
+        <span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+        <span class="n">Path</span><span class="p">(</span><span class="n">path</span><span class="p">)</span><span class="o">.</span><span class="n">parent</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">parents</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="n">fig</span><span class="o">.</span><span class="n">savefig</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">dpi</span><span class="o">=</span><span class="mi">120</span><span class="p">,</span> <span class="n">bbox_inches</span><span class="o">=</span><span class="s2">&quot;tight&quot;</span><span class="p">)</span>
+    <span class="n">plt</span><span class="o">.</span><span class="n">tight_layout</span><span class="p">()</span>
+</pre></div>
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">Volatility Extrapolation</a></h1>
+
+
+
+
+
+
+
+
+
+<search id="searchbox" style="display: none" role="search">
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Search"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script><h3>Navigation</h3>
+<p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../api/dgraph.html">DGraph</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../api/neural_processes.html">Neural Processes</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../api/shared.html">Shared Utilities</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../api/utils.html">Utils</a></li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../../../index.html">Documentation overview</a><ul>
+  <li><a href="../../index.html">Module code</a><ul>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;2026, Alvaro Abad.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 9.1.0</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 1.0.0</a>
+      
+    </div>
+
+    
+
+    
+  </body>
+</html>

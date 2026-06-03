@@ -17,13 +17,12 @@ class VolSurfacePCA:
     Storing total variance (w = σ²T) rather than implied vol avoids the 1/√T
     singularity near T = 0.
 
-    Attributes
-    ----------
-    k_grid : (n_k,)   – log-moneyness grid points (sorted)
-    T_grid : (n_T,)   – maturity grid points in years (sorted)
-    mean_  : (n_k*n_T,)
-    components_ : (n_components, n_k*n_T)
-    explained_variance_ratio_ : (n_components,)
+    Attributes:
+        k_grid: ``(n_k,)`` log-moneyness grid points (sorted).
+        T_grid: ``(n_T,)`` maturity grid points in years (sorted).
+        mean\_: ``(n_k*n_T,)`` mean total-variance vector.
+        components\_: ``(n_components, n_k*n_T)`` principal component vectors.
+        explained_variance_ratio\_: ``(n_components,)`` fraction of variance explained.
     """
 
     def __init__(
@@ -43,10 +42,9 @@ class VolSurfacePCA:
         """
         Fit PCA on a matrix of surface evaluations.
 
-        Parameters
-        ----------
-        X : (n_obs, n_k * n_T)
-            Each row is a flattened total-variance surface evaluated on the grid.
+        Args:
+            X: ``(n_obs, n_k * n_T)`` matrix; each row is a flattened
+                total-variance surface evaluated on the grid.
         """
         self.mean_ = X.mean(axis=0)
         X_c = X - self.mean_

@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../../../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>dgraph.time_stepping.updater &#8212; Volatility Extrapolation  documentation</title>
+    <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=5ecbeea2" />
+    <link rel="stylesheet" type="text/css" href="../../../_static/basic.css?v=b08954a9" />
+    <link rel="stylesheet" type="text/css" href="../../../_static/alabaster.css?v=27fed22d" />
+    <script src="../../../_static/documentation_options.js?v=5929fcd5"></script>
+    <script src="../../../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../../../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <h1>Source code for dgraph.time_stepping.updater</h1><div class="highlight"><pre>
+<span></span><span class="kn">import</span><span class="w"> </span><span class="nn">time</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">scipy.optimize</span><span class="w"> </span><span class="kn">import</span> <span class="n">minimize</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">..source.graph</span><span class="w"> </span><span class="kn">import</span> <span class="n">Graph</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">..source.observation</span><span class="w"> </span><span class="kn">import</span> <span class="n">ObservationSet</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">..losses.combined</span><span class="w"> </span><span class="kn">import</span> <span class="n">CombinedLoss</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">.roller</span><span class="w"> </span><span class="kn">import</span> <span class="n">Roller</span>
+
+
+<div class="viewcode-block" id="GraphUpdater">
+<a class="viewcode-back" href="../../../api/dgraph.html#dgraph.time_stepping.updater.GraphUpdater">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">GraphUpdater</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Fits the full graph in a single joint optimisation.</span>
+
+<span class="sd">    The graph&#39;s to_vector / from_vector methods handle flattening and</span>
+<span class="sd">    reconstruction.</span>
+
+<span class="sd">    Note: for separable losses (no GraphLoss) prefer SeparableGraphUpdater,</span>
+<span class="sd">    which solves one n_params-D problem per node instead of one (n_nodes *</span>
+<span class="sd">    n_params)-D joint problem which is much faster.</span>
+
+<span class="sd">    If loss.roller is set and prior_graph is provided, node precisions in the</span>
+<span class="sd">    returned graph are initialised from the rolled prior (i.e. decayed) rather</span>
+<span class="sd">    than carried over from the initial graph.  If precision_gain is also set,</span>
+<span class="sd">    update_node_precision is applied after fitting to accumulate information</span>
+<span class="sd">    from the new observations.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">loss</span><span class="p">:</span> <span class="n">CombinedLoss</span><span class="p">,</span>
+        <span class="n">roller</span><span class="p">:</span> <span class="n">Roller</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">bounds</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+        <span class="n">method</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;L-BFGS-B&quot;</span><span class="p">,</span>
+        <span class="n">precision_gain</span><span class="p">:</span> <span class="nb">float</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">verbose</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+    <span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;TODO.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            loss: TODO.</span>
+<span class="sd">            roller: TODO.</span>
+<span class="sd">            bounds: TODO.</span>
+<span class="sd">            method: TODO.</span>
+<span class="sd">            precision_gain: TODO.</span>
+<span class="sd">            verbose: TODO.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">loss</span> <span class="o">=</span> <span class="n">loss</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">roller</span> <span class="o">=</span> <span class="n">roller</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">bounds</span> <span class="o">=</span> <span class="n">bounds</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">method</span> <span class="o">=</span> <span class="n">method</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">precision_gain</span> <span class="o">=</span> <span class="n">precision_gain</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">verbose</span> <span class="o">=</span> <span class="n">verbose</span>
+
+<div class="viewcode-block" id="GraphUpdater.update">
+<a class="viewcode-back" href="../../../api/dgraph.html#dgraph.time_stepping.updater.GraphUpdater.update">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">update</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">graph</span><span class="p">:</span> <span class="n">Graph</span><span class="p">,</span>
+        <span class="n">observations</span><span class="p">:</span> <span class="n">ObservationSet</span><span class="p">,</span>
+        <span class="n">prior_graph</span><span class="p">:</span> <span class="n">Graph</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Graph</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;TODO.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            graph: TODO.</span>
+<span class="sd">            observations: TODO.</span>
+<span class="sd">            prior_graph: TODO.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            TODO.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="c1"># get time increment</span>
+        <span class="n">dt</span><span class="p">:</span> <span class="nb">float</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="p">(</span><span class="n">observations</span><span class="o">.</span><span class="n">date</span> <span class="o">-</span> <span class="n">prior_graph</span><span class="o">.</span><span class="n">date</span><span class="p">)</span><span class="o">.</span><span class="n">days</span> <span class="o">/</span> <span class="mi">365</span>
+            <span class="k">if</span> <span class="n">prior_graph</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span>
+            <span class="k">else</span> <span class="kc">None</span>
+        <span class="p">)</span>
+
+        <span class="c1"># roll prior</span>
+        <span class="n">rolled</span><span class="p">:</span> <span class="n">Graph</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">roller</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">prior_graph</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">dt</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">rolled</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">roller</span><span class="o">.</span><span class="n">roll</span><span class="p">(</span><span class="n">prior_graph</span><span class="p">,</span> <span class="n">dt</span><span class="p">)</span>
+
+        <span class="c1"># minimize loss</span>
+        <span class="n">x0</span> <span class="o">=</span> <span class="n">graph</span><span class="o">.</span><span class="n">to_vector</span><span class="p">()</span>
+        <span class="n">n_nodes</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="nb">list</span><span class="p">(</span><span class="n">graph</span><span class="o">.</span><span class="n">node_ids</span><span class="p">()))</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">verbose</span><span class="p">:</span>
+            <span class="n">t0</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+            <span class="n">iters</span> <span class="o">=</span> <span class="mi">0</span>
+            <span class="n">last_loss</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="s2">&quot;inf&quot;</span><span class="p">)</span>
+
+            <span class="k">def</span><span class="w"> </span><span class="nf">objective</span><span class="p">(</span><span class="n">v</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">float</span><span class="p">:</span>
+                <span class="n">val</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">loss</span><span class="p">(</span><span class="n">graph</span><span class="o">.</span><span class="n">from_vector</span><span class="p">(</span><span class="n">v</span><span class="p">),</span> <span class="n">observations</span><span class="p">,</span> <span class="n">rolled</span><span class="p">)</span>
+                <span class="n">last_loss</span> <span class="o">=</span> <span class="n">val</span>
+                <span class="k">return</span> <span class="n">val</span>
+            
+            <span class="c1"># Print time taken per minimize iteration</span>
+            <span class="k">def</span><span class="w"> </span><span class="nf">callback</span><span class="p">(</span><span class="n">_</span><span class="p">):</span>
+                <span class="n">iters</span> <span class="o">+=</span> <span class="mi">1</span>
+                <span class="n">elapsed</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span> <span class="o">-</span> <span class="n">t0</span>
+                <span class="nb">print</span><span class="p">(</span>
+                    <span class="sa">f</span><span class="s2">&quot;  iter </span><span class="si">{</span><span class="n">iters</span><span class="si">:</span><span class="s2">4d</span><span class="si">}</span><span class="s2"> | loss </span><span class="si">{</span><span class="n">last_loss</span><span class="si">:</span><span class="s2">.6f</span><span class="si">}</span><span class="s2">&quot;</span>
+                    <span class="sa">f</span><span class="s2">&quot; | </span><span class="si">{</span><span class="n">elapsed</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2">s | </span><span class="si">{</span><span class="n">n_nodes</span><span class="si">}</span><span class="s2"> nodes&quot;</span><span class="p">,</span>
+                    <span class="n">end</span><span class="o">=</span><span class="s2">&quot;</span><span class="se">\r</span><span class="s2">&quot;</span><span class="p">,</span>
+                <span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">def</span><span class="w"> </span><span class="nf">objective</span><span class="p">(</span><span class="n">v</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">float</span><span class="p">:</span>
+                <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">loss</span><span class="p">(</span><span class="n">graph</span><span class="o">.</span><span class="n">from_vector</span><span class="p">(</span><span class="n">v</span><span class="p">),</span> <span class="n">observations</span><span class="p">,</span> <span class="n">rolled</span><span class="p">)</span>
+            <span class="n">callback</span> <span class="o">=</span> <span class="kc">None</span>
+
+        <span class="n">bounds</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">bounds</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">bounds</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">graph</span><span class="o">.</span><span class="n">parameter_bounds</span><span class="p">()</span>
+        <span class="n">result</span> <span class="o">=</span> <span class="n">minimize</span><span class="p">(</span><span class="n">objective</span><span class="p">,</span> <span class="n">x0</span><span class="p">,</span> <span class="n">method</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">method</span><span class="p">,</span> <span class="n">bounds</span><span class="o">=</span><span class="n">bounds</span><span class="p">,</span> <span class="n">callback</span><span class="o">=</span><span class="n">callback</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">verbose</span><span class="p">:</span>
+            <span class="n">elapsed</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span> <span class="o">-</span> <span class="n">t0</span>
+            <span class="nb">print</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;  done  </span><span class="si">{</span><span class="n">iters</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="si">:</span><span class="s2">4d</span><span class="si">}</span><span class="s2"> iters | loss </span><span class="si">{</span><span class="n">result</span><span class="o">.</span><span class="n">fun</span><span class="si">:</span><span class="s2">.6f</span><span class="si">}</span><span class="s2">&quot;</span>
+                <span class="sa">f</span><span class="s2">&quot; | </span><span class="si">{</span><span class="n">elapsed</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2">s | </span><span class="si">{</span><span class="n">n_nodes</span><span class="si">}</span><span class="s2"> nodes&quot;</span>
+            <span class="p">)</span>
+        <span class="n">fitted</span> <span class="o">=</span> <span class="n">graph</span><span class="o">.</span><span class="n">from_vector</span><span class="p">(</span><span class="n">result</span><span class="o">.</span><span class="n">x</span><span class="p">)</span>
+
+        <span class="c1"># set precision to that of the prior</span>
+        <span class="k">if</span> <span class="n">rolled</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">new_nodes</span> <span class="o">=</span> <span class="p">{</span>
+                <span class="n">nid</span><span class="p">:</span> <span class="n">fitted</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">nid</span><span class="p">)</span><span class="o">.</span><span class="n">with_precision</span><span class="p">(</span><span class="n">rolled</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">nid</span><span class="p">)</span><span class="o">.</span><span class="n">precision</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">nid</span> <span class="ow">in</span> <span class="n">rolled</span><span class="o">.</span><span class="n">nodes</span> <span class="k">else</span> <span class="n">fitted</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">nid</span><span class="p">)</span>
+                <span class="k">for</span> <span class="n">nid</span> <span class="ow">in</span> <span class="n">fitted</span><span class="o">.</span><span class="n">node_ids</span><span class="p">()</span>
+            <span class="p">}</span>
+            <span class="n">fitted</span> <span class="o">=</span> <span class="n">Graph</span><span class="p">(</span><span class="n">fitted</span><span class="o">.</span><span class="n">date</span><span class="p">,</span> <span class="n">new_nodes</span><span class="p">,</span> <span class="n">fitted</span><span class="o">.</span><span class="n">edges</span><span class="p">)</span>
+
+        <span class="c1"># update precision based on observations</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">precision_gain</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">fitted</span> <span class="o">=</span> <span class="n">update_node_precision</span><span class="p">(</span><span class="n">fitted</span><span class="p">,</span> <span class="n">observations</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">precision_gain</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">fitted</span></div>
+</div>
+
+
+
+
+<div class="viewcode-block" id="SeparableGraphUpdater">
+<a class="viewcode-back" href="../../../api/dgraph.html#dgraph.time_stepping.updater.SeparableGraphUpdater">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">SeparableGraphUpdater</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Optimises each node independently — valid for separable loss functions,</span>
+<span class="sd">    i.e. DataLoss + TemporalLoss without any GraphLoss coupling.</span>
+
+<span class="sd">    Each node becomes its own small optimisation problem (n_params dimensions</span>
+<span class="sd">    instead of n_nodes * n_params), which converges in far fewer iterations and</span>
+<span class="sd">    evaluations.  The existing CombinedLoss is reused: passing a single-node</span>
+<span class="sd">    mini-graph to it causes each loss component to evaluate only that node&#39;s</span>
+<span class="sd">    contribution, which is correct whenever both DataLoss and TemporalLoss are</span>
+<span class="sd">    sums over nodes.</span>
+
+<span class="sd">    Precision rolling and accumulation follow the same logic as GraphUpdater.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">loss</span><span class="p">:</span> <span class="n">CombinedLoss</span><span class="p">,</span>
+        <span class="n">roller</span><span class="p">:</span> <span class="n">Roller</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">method</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;L-BFGS-B&quot;</span><span class="p">,</span>
+        <span class="n">precision_gain</span><span class="p">:</span> <span class="nb">float</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;TODO.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            loss: TODO.</span>
+<span class="sd">            roller: TODO.</span>
+<span class="sd">            method: TODO.</span>
+<span class="sd">            precision_gain: TODO.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">loss</span> <span class="o">=</span> <span class="n">loss</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">roller</span> <span class="o">=</span> <span class="n">roller</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">method</span> <span class="o">=</span> <span class="n">method</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">precision_gain</span> <span class="o">=</span> <span class="n">precision_gain</span>
+
+<div class="viewcode-block" id="SeparableGraphUpdater.update">
+<a class="viewcode-back" href="../../../api/dgraph.html#dgraph.time_stepping.updater.SeparableGraphUpdater.update">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">update</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">graph</span><span class="p">:</span> <span class="n">Graph</span><span class="p">,</span>
+        <span class="n">observations</span><span class="p">:</span> <span class="n">ObservationSet</span><span class="p">,</span>
+        <span class="n">prior_graph</span><span class="p">:</span> <span class="n">Graph</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Graph</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;TODO.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            graph: TODO.</span>
+<span class="sd">            observations: TODO.</span>
+<span class="sd">            prior_graph: TODO.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            TODO.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">dt</span><span class="p">:</span> <span class="nb">float</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="p">(</span><span class="n">observations</span><span class="o">.</span><span class="n">date</span> <span class="o">-</span> <span class="n">prior_graph</span><span class="o">.</span><span class="n">date</span><span class="p">)</span><span class="o">.</span><span class="n">days</span> <span class="o">/</span> <span class="mi">365</span>
+            <span class="k">if</span> <span class="n">prior_graph</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span>
+            <span class="k">else</span> <span class="kc">None</span>
+        <span class="p">)</span>
+
+        <span class="n">rolled</span><span class="p">:</span> <span class="n">Graph</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">roller</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">prior_graph</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">dt</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">rolled</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">roller</span><span class="o">.</span><span class="n">roll</span><span class="p">(</span><span class="n">prior_graph</span><span class="p">,</span> <span class="n">dt</span><span class="p">)</span>
+
+        <span class="n">new_nodes</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span><span class="n">graph</span><span class="o">.</span><span class="n">nodes</span><span class="p">)</span>
+
+        <span class="k">for</span> <span class="n">nid</span> <span class="ow">in</span> <span class="n">graph</span><span class="o">.</span><span class="n">node_ids</span><span class="p">():</span>
+            <span class="n">state</span> <span class="o">=</span> <span class="n">graph</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">nid</span><span class="p">)</span>
+            <span class="n">x0</span>     <span class="o">=</span> <span class="n">state</span><span class="o">.</span><span class="n">parameters</span><span class="p">()</span>
+            <span class="n">bounds</span> <span class="o">=</span> <span class="n">state</span><span class="o">.</span><span class="n">bounds</span><span class="p">()</span>
+
+            <span class="k">def</span><span class="w"> </span><span class="nf">objective</span><span class="p">(</span><span class="n">params</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">_nid</span><span class="o">=</span><span class="n">nid</span><span class="p">,</span> <span class="n">_state</span><span class="o">=</span><span class="n">state</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">float</span><span class="p">:</span>
+                <span class="n">mini</span> <span class="o">=</span> <span class="n">Graph</span><span class="p">(</span><span class="n">graph</span><span class="o">.</span><span class="n">date</span><span class="p">,</span> <span class="p">{</span><span class="n">_nid</span><span class="p">:</span> <span class="n">_state</span><span class="o">.</span><span class="n">from_parameters</span><span class="p">(</span><span class="n">params</span><span class="p">)},</span> <span class="n">graph</span><span class="o">.</span><span class="n">edges</span><span class="p">)</span>
+                <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">loss</span><span class="p">(</span><span class="n">mini</span><span class="p">,</span> <span class="n">observations</span><span class="p">,</span> <span class="n">rolled</span><span class="p">)</span>
+
+            <span class="n">result</span> <span class="o">=</span> <span class="n">minimize</span><span class="p">(</span><span class="n">objective</span><span class="p">,</span> <span class="n">x0</span><span class="p">,</span> <span class="n">method</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">method</span><span class="p">,</span> <span class="n">bounds</span><span class="o">=</span><span class="n">bounds</span><span class="p">)</span>
+            <span class="n">fitted_state</span> <span class="o">=</span> <span class="n">state</span><span class="o">.</span><span class="n">from_parameters</span><span class="p">(</span><span class="n">result</span><span class="o">.</span><span class="n">x</span><span class="p">)</span>
+
+            <span class="k">if</span> <span class="n">rolled</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">nid</span> <span class="ow">in</span> <span class="n">rolled</span><span class="o">.</span><span class="n">nodes</span><span class="p">:</span>
+                <span class="n">fitted_state</span> <span class="o">=</span> <span class="n">fitted_state</span><span class="o">.</span><span class="n">with_precision</span><span class="p">(</span><span class="n">rolled</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">nid</span><span class="p">)</span><span class="o">.</span><span class="n">precision</span><span class="p">)</span>
+
+            <span class="n">new_nodes</span><span class="p">[</span><span class="n">nid</span><span class="p">]</span> <span class="o">=</span> <span class="n">fitted_state</span>
+
+        <span class="n">fitted</span> <span class="o">=</span> <span class="n">Graph</span><span class="p">(</span><span class="n">graph</span><span class="o">.</span><span class="n">date</span><span class="p">,</span> <span class="n">new_nodes</span><span class="p">,</span> <span class="n">graph</span><span class="o">.</span><span class="n">edges</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">precision_gain</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">fitted</span> <span class="o">=</span> <span class="n">update_node_precision</span><span class="p">(</span><span class="n">fitted</span><span class="p">,</span> <span class="n">observations</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">precision_gain</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">fitted</span></div>
+</div>
+
+
+
+<div class="viewcode-block" id="update_node_precision">
+<a class="viewcode-back" href="../../../api/dgraph.html#dgraph.time_stepping.updater.update_node_precision">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">update_node_precision</span><span class="p">(</span>
+    <span class="n">graph</span><span class="p">:</span> <span class="n">Graph</span><span class="p">,</span>
+    <span class="n">observations</span><span class="p">:</span> <span class="n">ObservationSet</span><span class="p">,</span>
+    <span class="n">c</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Graph</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;TODO.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        graph: TODO.</span>
+<span class="sd">        observations: TODO.</span>
+<span class="sd">        c: TODO.</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        TODO.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">new_nodes</span><span class="p">:</span> <span class="nb">dict</span> <span class="o">=</span> <span class="p">{}</span>
+
+    <span class="k">for</span> <span class="n">nid</span> <span class="ow">in</span> <span class="n">graph</span><span class="o">.</span><span class="n">node_ids</span><span class="p">():</span>
+        <span class="n">state</span> <span class="o">=</span> <span class="n">graph</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">nid</span><span class="p">)</span>
+        <span class="n">obs_list</span> <span class="o">=</span> <span class="n">observations</span><span class="o">.</span><span class="n">for_node</span><span class="p">(</span><span class="n">nid</span><span class="p">)</span> <span class="c1"># get observations for each node.</span>
+
+        <span class="k">if</span> <span class="n">obs_list</span><span class="p">:</span>
+            <span class="n">total_weight</span> <span class="o">=</span> <span class="nb">sum</span><span class="p">(</span><span class="n">o</span><span class="o">.</span><span class="n">weight</span> <span class="k">for</span> <span class="n">o</span> <span class="ow">in</span> <span class="n">obs_list</span><span class="p">)</span>
+            <span class="n">p</span> <span class="o">=</span> <span class="n">state</span><span class="o">.</span><span class="n">precision</span>
+            <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">p</span><span class="p">,</span> <span class="p">(</span><span class="nb">int</span><span class="p">,</span> <span class="nb">float</span><span class="p">)):</span>
+                <span class="n">new_precision</span> <span class="o">=</span> <span class="n">p</span> <span class="o">+</span> <span class="n">c</span> <span class="o">*</span> <span class="n">total_weight</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">new_precision</span> <span class="o">=</span> <span class="n">p</span> <span class="o">+</span> <span class="n">c</span> <span class="o">*</span> <span class="n">total_weight</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">eye</span><span class="p">(</span><span class="n">state</span><span class="o">.</span><span class="n">n_params</span><span class="p">)</span> <span class="c1"># Assumes that precision only changes diagonal entries.</span>
+            <span class="n">new_nodes</span><span class="p">[</span><span class="n">nid</span><span class="p">]</span> <span class="o">=</span> <span class="n">state</span><span class="o">.</span><span class="n">with_precision</span><span class="p">(</span><span class="n">new_precision</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">new_nodes</span><span class="p">[</span><span class="n">nid</span><span class="p">]</span> <span class="o">=</span> <span class="n">state</span>
+
+    <span class="k">return</span> <span class="n">Graph</span><span class="p">(</span><span class="n">graph</span><span class="o">.</span><span class="n">date</span><span class="p">,</span> <span class="n">new_nodes</span><span class="p">,</span> <span class="n">graph</span><span class="o">.</span><span class="n">edges</span><span class="p">)</span></div>
+
+</pre></div>
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">Volatility Extrapolation</a></h1>
+
+
+
+
+
+
+
+
+
+<search id="searchbox" style="display: none" role="search">
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Search"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script><h3>Navigation</h3>
+<p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../api/dgraph.html">DGraph</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../api/neural_processes.html">Neural Processes</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../api/shared.html">Shared Utilities</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../api/utils.html">Utils</a></li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../../../index.html">Documentation overview</a><ul>
+  <li><a href="../../index.html">Module code</a><ul>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;2026, Alvaro Abad.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 9.1.0</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 1.0.0</a>
+      
+    </div>
+
+    
+
+    
+  </body>
+</html>

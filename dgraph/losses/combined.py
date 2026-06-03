@@ -29,8 +29,18 @@ class CombinedLoss:
         lambda_temporal: float = 1.0,
         lambda_graph: float = 1.0,
         lambda_node: float = 1.0,
-        verbose = False,
     ):
+        """
+        Args:
+            data_loss
+            temporal_loss
+            graph_loss
+            node_loss
+            lambda_data
+            lambda_temporal
+            lambda_graph
+            lambda_node
+        """
         self.data_loss = data_loss
         self.temporal_loss = temporal_loss
         self.graph_loss = graph_loss
@@ -39,7 +49,6 @@ class CombinedLoss:
         self.lambda_temporal = lambda_temporal
         self.lambda_graph = lambda_graph
         self.lambda_node = lambda_node
-        self.verbose = verbose
 
     def __call__(
         self,
@@ -48,27 +57,26 @@ class CombinedLoss:
         rolled_prior: Graph | None = None,
     ) -> float:
         """
-        Computes total loss. Assumes that the given prior is already rolled.
+        Args:
+            graph: New graph candidate.
+            observations: New observations.
+            rolled_prior: Rolled prior graph.
+
+        Returns:
+            float: The loss.
         """
         total = 0.0
 
         if self.data_loss is not None:
             total += self.lambda_data * self.data_loss(graph, observations)
-            if self.verbose: print(f"Data Loss is: {self.data_loss(graph, observations)}")
-
 
         if self.temporal_loss is not None and rolled_prior is not None:
             total += self.lambda_temporal * self.temporal_loss(graph, rolled_prior)
-            if self.verbose: print(f"Temporal Loss is: {self.temporal_loss(graph, rolled_prior)}")
 
         if self.graph_loss is not None and rolled_prior is not None:
             total += self.lambda_graph * self.graph_loss(graph, rolled_prior)
-            if self.verbose: print(f"Graph Loss is: {self.graph_loss(graph, rolled_prior)}")
 
         if self.node_loss is not None:
             total += self.lambda_node * self.node_loss(graph)
-            if self.verbose: print(f"Node Loss is: {self.node_loss(graph)}")
-
-        if self.verbose: print("\n")
 
         return total

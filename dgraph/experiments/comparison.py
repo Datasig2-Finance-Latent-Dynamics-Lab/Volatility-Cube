@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import dataclasses
 import json
+from pathlib import Path
+from typing import Any
 
 import numpy as np
 
@@ -9,6 +11,8 @@ from dgraph.source.graph import Graph
 from dgraph.source.observation import ObservationSet
 from dgraph.losses.data import DataLoss
 from dgraph.experiments.splitter import NodeMaskingSplitter
+
+# I know nothing about HTML, done fully by claude code.
 
 
 # ---------------------------------------------------------------------------
@@ -218,6 +222,8 @@ class ModelComparison:
         self._graphs:     dict[str, Graph] = {}
         self._train_obs:  ObservationSet | None = None
         self._test_obs:   ObservationSet | None = None
+        # Accumulated per-date results (date, results_snapshot) for each eval step.
+        self._date_results: list[tuple[Any, dict]] = []
 
     # ------------------------------------------------------------------
     # Core API
@@ -247,6 +253,12 @@ class ModelComparison:
                 "test_unmasked": self._eval_with_stats(graph, unmasked_obs) if unmasked_obs else None,
                 "test_masked":   self._eval_with_stats(graph, masked_obs)   if masked_obs   else None,
             }
+        # Snapshot: shallow-copy each metrics dict so later updates don't mutate history.
+        snapshot = {
+            name: {split: dict(m) if m else None for split, m in r.items()}
+            for name, r in self.results.items()
+        }
+        self._date_results.append((test_obs.date, snapshot))
         return self
 
     def __call__(
@@ -258,6 +270,108 @@ class ModelComparison:
         return self.compare(graphs, train_obs, test_obs)
 
     # ------------------------------------------------------------------
+    # Aggregation helpers
+    # ------------------------------------------------------------------
+
+    @property
+    def _display_results(self) -> dict:
+        """Aggregate means if multiple eval dates have been accumulated, else last date."""
+        if self._date_results:
+            return self.aggregate_results()
+        return self.results
+
+    def aggregate_results(self) -> dict:
+        """Mean metrics across all accumulated eval dates."""
+        if not self._date_results:
+            return self.results
+        model_names = list(self._date_results[0][1].keys())
+        all_splits = ["train", "test", "test_unmasked", "test_masked"]
+        result: dict = {}
+        for name in model_names:
+            result[name] = {}
+            for split in all_splits:
+                vals: dict[str, list[float]] = {}
+                for _, date_r in self._date_results:
+                    d = date_r.get(name, {}).get(split)
+                    if d is None:
+                        continue
+                    for k, v in d.items():
+                        vals.setdefault(k, []).append(float(v))
+                result[name][split] = (
+                    {k: float(np.mean(v)) for k, v in vals.items()}
+                    if vals else None
+                )
+        return result
+
+    def save_metrics(
+        self,
+        path: str,
+        results_csv: str | None = None,
+        experiment: str | None = None,
+    ) -> None:
+        """Save per-date and aggregate metrics as JSON.
+
+        If results_csv and experiment are both provided, also upserts one row
+        per model into the shared comparison CSV (keyed on experiment + model).
+        """
+        per_date = [
+            {
+                "date": str(date),
+                "results": {
+                    name: {
+                        split: (
+                            {k: round(float(v), 8) for k, v in m.items()}
+                            if m else None
+                        )
+                        for split, m in model_r.items()
+                    }
+                    for name, model_r in r.items()
+                },
+            }
+            for date, r in self._date_results
+        ]
+        aggregate = {
+            name: {
+                split: (
+                    {k: round(float(v), 8) for k, v in m.items()}
+                    if m else None
+                )
+                for split, m in splits.items()
+            }
+            for name, splits in self.aggregate_results().items()
+        }
+        output = {
+            "n_eval_days": len(self._date_results),
+            "per_date": per_date,
+            "aggregate": aggregate,
+        }
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "w") as f:
+            json.dump(output, f, indent=2)
+        print(f"Saved metrics to {path}")
+
+        if results_csv is not None and experiment is not None:
+            import math
+            from utils.results_csv import upsert_results_csv
+            rows = []
+            for model_name, splits in self.aggregate_results().items():
+                test = splits.get("test") or {}
+                mse  = test.get("mse")
+                row: dict = {
+                    "experiment":      experiment,
+                    "model":           model_name,
+                    "n_eval_days":     len(self._date_results),
+                    "test_mse":        round(mse, 8) if mse is not None else None,
+                    "test_rmse":       round(math.sqrt(mse), 8) if mse is not None else None,
+                    "test_mae":        round(test["mae"], 8) if test.get("mae") is not None else None,
+                    "test_mape":       round(test["mape"], 8) if test.get("mape") is not None else None,
+                    "test_max_mae":    round(test["max_mae"], 8) if test.get("max_mae") is not None else None,
+                    "test_median_mae": round(test["median_mae"], 8) if test.get("median_mae") is not None else None,
+                }
+                rows.append(row)
+            upsert_results_csv(results_csv, rows)
+
+    # ------------------------------------------------------------------
     # Display
     # ------------------------------------------------------------------
 
@@ -266,9 +380,14 @@ class ModelComparison:
             print("No results — call compare() first.")
             return
 
-        first    = next(iter(self.results.values()))
+        disp = self._display_results
+        n = len(self._date_results)
+        if n > 1:
+            title = f"{title} (mean over {n} eval dates)"
+
+        first    = next(iter(disp.values()))
         mk_keys  = list(first["test"].keys())
-        has_split = any(r.get("test_masked") is not None for r in self.results.values())
+        has_split = any(r.get("test_masked") is not None for r in disp.values())
 
         splits = ["train", "test"]
         if has_split:
@@ -276,7 +395,7 @@ class ModelComparison:
         slabels = {"train": "Train", "test": "Test",
                    "test_unmasked": "Unmasked", "test_masked": "Masked"}
 
-        col = max(len(n) for n in self.results) + 2
+        col = max(len(n) for n in disp) + 2
         w   = 11
 
         def _fmt(d, key):
@@ -292,7 +411,7 @@ class ModelComparison:
         print(hdr)
         print("-" * (col + len(splits) * len(mk_keys) * (w + 1)))
 
-        for name, r in self.results.items():
+        for name, r in disp.items():
             row = f"{name:<{col}}"
             for s in splits:
                 for m in mk_keys:
@@ -301,6 +420,7 @@ class ModelComparison:
 
     def to_html(self, path: str, title: str = "Model Comparison") -> None:
         """Write an interactive HTML report to *path*."""
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
         html = self._build_html(title)
         with open(path, "w") as f:
             f.write(html)
@@ -349,13 +469,14 @@ class ModelComparison:
                         "precision":   _serialize_precision(state.precision),
                     }
 
-        # Summary metrics
-        first_r   = next(iter(self.results.values()))
+        # Summary metrics — use aggregate means across all eval dates if available.
+        disp = self._display_results
+        first_r   = next(iter(disp.values()))
         mk_keys   = list(first_r["test"].keys())
-        has_split = any(r.get("test_masked") is not None for r in self.results.values())
+        has_split = any(r.get("test_masked") is not None for r in disp.values())
 
         summary: dict = {}
-        for name, r in self.results.items():
+        for name, r in disp.items():
             summary[name] = {}
             for split in ["train", "test", "test_unmasked", "test_masked"]:
                 d = r.get(split)

@@ -11,14 +11,34 @@ from ..source.state import State
 # ---------------------------------------------------------------------------
 
 class StateDistance(ABC):
+    """Abstract dataclass for distance between two states."""
+
     @abstractmethod
     def __call__(self, s1: State, s2: State) -> float:
+        """TODO.
+
+        Args:
+            s1 (State)
+            s2 (State)
+
+        Returns:
+            float
+        """
         ...
 
 
 class L2ParameterDistance(StateDistance):
     """MSE between state parameter vectors, ignores precisions."""
+
     def __call__(self, s1: State, s2: State) -> float:
+        """
+        Args:
+            s1 (State)
+            s2 (State)
+
+        Returns:
+            float
+        """
         diff = s1.parameters() - s2.parameters()
         return float(np.mean(diff ** 2))
 
@@ -38,14 +58,19 @@ class PrecisionWeightedL2Distance(StateDistance):
     """
 
     def __call__(self, new: State, prior: State) -> float:
+        """
+        Args:
+            new (State)
+            prior (State)
+
+        Returns:
+            float
+        """
         r = new.parameters() - prior.parameters()
-        p = prior.precision  # prior precision: how informative is the prior
+        p = prior.precision  # prior precision: how informative is each parameter of the prior
         if isinstance(p, (int, float)):
             return float(p * np.dot(r, r))
         return float(r @ p @ r)
-
-
-# TODO: Add distance based on L2 distance between functions of the state (e.g implied volatility)
 
 
 # ---------------------------------------------------------------------------
@@ -56,8 +81,17 @@ class GraphDistance(ABC):
     """
     Abstract data class for distance between two graphs.
     """
+
     @abstractmethod
     def __call__(self, g1: Graph, g2: Graph) -> float:
+        """
+        Args:
+            g1 (Graph)
+            g2 (Graph)
+
+        Returns:
+            float
+        """
         ...
 
 
@@ -75,6 +109,14 @@ class NodewiseGraphDistance(GraphDistance):
         self.state_distance = state_distance
 
     def __call__(self, g1: Graph, g2: Graph) -> float:
+        """
+        Args:
+            g1 (Graph)
+            g2 (Graph)
+
+        Returns:
+            float
+        """
         common = set(g1.node_ids()) & set(g2.node_ids())
         return sum(self.state_distance(g1.get(nid), g2.get(nid)) for nid in common)
 
@@ -93,4 +135,13 @@ class TemporalLoss:
         self.graph_distance = graph_distance
 
     def __call__(self, graph: Graph, rolled_prior: Graph) -> float:
+        """
+        Args:
+            graph (Graph)
+            rolled_prior (Graph)
+
+        Returns:
+            float
+        """
         return self.graph_distance(graph, rolled_prior)
+    

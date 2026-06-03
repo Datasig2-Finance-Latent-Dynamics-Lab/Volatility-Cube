@@ -10,7 +10,7 @@ All losses are computed in implied-vol space σ(k) directly, since BSplineState
 coefficients now represent IV (not total variance).
 """
 
-# Done by ClaudeCode, doing normal minimization from scipy is painfully slow as one would expect.
+# Done by ClaudeCode, doing normal minimization from scipy for BSplines is painfully slow as one would expect.
 
 # TODO: Look more into this if I make states that are parametrized by a basis in general.
 
@@ -32,7 +32,6 @@ class BSplineUpdater:
     joint quadratic loss in one step.
 
     Loss (implied-vol space)
-    ------------------------
       L = lambda_data * sum_i  ||sqrt(W_i) (B_i c_i - iv_obs_i)||^2
         + lambda_temporal * sum_i  ||c_i - c_prior_i||^2
         + lambda_graph * sum_{(i,j)} weight_ij * ||c_i - c_j||^2
@@ -41,7 +40,6 @@ class BSplineUpdater:
     is assembled and solved in one shot via numpy.linalg.solve.
 
     Parameters
-    ----------
     lambda_data      : weight on the data fidelity term
     lambda_temporal  : weight on the temporal regularisation term
     lambda_graph     : weight on the cross-node graph regularisation term
@@ -52,13 +50,11 @@ class BSplineUpdater:
         lambda_data: float = 1.0,
         lambda_temporal: float = 0.0,
         lambda_graph: float = 0.0,
-        verbose = False,
     ):
         self.lambda_data = lambda_data
         self.lambda_temporal = lambda_temporal
         self.lambda_graph = lambda_graph
 
-        # cache: (obs_id, node_id) -> (B, w_obs, W_diag)
         self._obs_cache: dict = {}
 
     # ------------------------------------------------------------------
@@ -71,6 +67,19 @@ class BSplineUpdater:
         observations: ObservationSet,
         prior_graph: Graph | None = None,
     ) -> Graph:
+        """Updates the graph.
+
+        Args:
+            graph (Graph): _description_
+            observations (ObservationSet): _description_
+            prior_graph (Graph | None, optional): _description_. Defaults to None.
+
+        Raises:
+            TypeError: _description_
+
+        Returns:
+            Graph: _description_
+        """
         
         node_ids = [nid for nid in graph.node_ids() if isinstance(nid, CurveNode)]
         n = len(node_ids)

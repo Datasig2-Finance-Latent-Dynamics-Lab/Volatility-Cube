@@ -7,13 +7,18 @@ import torch.nn.functional as F
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from neural_processes.data.base import SurfaceDataset
-from .cnp import MultiAssetCNP, FittedCNP
+from .cnp import MultiAssetCNP, FittedCNP, FittedDeltaCNP
 
 
 class Trainer:
     """Trains a MultiAssetCNP on a SurfaceDataset and returns a FittedCNP."""
 
     def __init__(self, config):
+        """TODO.
+
+        Args:
+            config: TODO.
+        """
         self.cfg = config
 
     def train(
@@ -21,9 +26,14 @@ class Trainer:
         dataset: SurfaceDataset,
         init_module: MultiAssetCNP | None = None,
     ):
-        """
-        init_module: optional pre-initialised MultiAssetCNP (e.g. from transfer learning).
-                     If provided it is used as-is; otherwise a fresh module is created.
+        """TODO.
+
+        Args:
+            dataset: TODO.
+            init_module: TODO.
+
+        Returns:
+            TODO.
         """
         cfg = self.cfg
         dev = torch.device(cfg.device)
@@ -33,6 +43,17 @@ class Trainer:
         n_assets  = dataset.n_assets
         ctx_max   = dataset.ctx_max
 
+        delta_mode = dataset.prior_targets is not None
+
+        if delta_mode:
+            # Exclude days where the prior is unavailable (day 0 = all-NaN row)
+            has_prior = np.array([
+                np.any(np.isfinite(dataset.prior_targets[i]))
+                for i in range(dataset.n_days)
+            ])
+            train_idx = train_idx[has_prior[train_idx]]
+            val_idx   = val_idx[has_prior[val_idx]]
+
         # ── Feature normalisation (exclude zero-padded positions, T is dim 1) ──
         qf_train   = dataset.query_feats[train_idx]         # (N_tr, P, q_dim)
         valid_tr   = qf_train[:, :, 1] > 0                  # (N_tr, P)
@@ -41,26 +62,61 @@ class Trainer:
         feat_mean  = feat_valid.mean(0).astype(np.float32)
         feat_std   = (feat_valid.std(0) + 1e-8).astype(np.float32)
 
-        # ── Per-asset log(IV) normalisation ───────────────────────────────────
-        aids_train   = dataset.asset_ids[train_idx]
-        log_iv_train = np.log(np.maximum(dataset.targets[train_idx], 1e-8))
-        log_tgt_mean = np.zeros(n_assets, dtype=np.float32)
-        log_tgt_std  = np.ones(n_assets,  dtype=np.float32)
-        for a in range(n_assets):
-            mask_a = valid_tr & (aids_train == a)
-            vals   = log_iv_train[mask_a]
-            if len(vals) > 1:
-                log_tgt_mean[a] = float(vals.mean())
-                log_tgt_std[a]  = float(vals.std() + 1e-8)
+        if delta_mode:
+            # ── Per-asset delta normalisation ─────────────────────────────────
+            aids_train  = dataset.asset_ids[train_idx]
+            delta_train = (dataset.targets[train_idx]
+                           - dataset.prior_targets[train_idx])
+            delta_mean  = np.zeros(n_assets, dtype=np.float32)
+            delta_std   = np.ones(n_assets,  dtype=np.float32)
+            for a in range(n_assets):
+                mask_a = valid_tr & (aids_train == a)
+                vals   = delta_train[mask_a]
+                vals   = vals[np.isfinite(vals)]
+                if len(vals) > 1:
+                    # Robust: clip to 1st–99th percentile before computing std
+                    # so that rare BSpline failures don't inflate the scale.
+                    lo, hi  = np.percentile(vals, [1.0, 99.0])
+                    vals_r  = vals[(vals >= lo) & (vals <= hi)]
+                    if len(vals_r) > 1:
+                        delta_mean[a] = float(vals_r.mean())
+                        delta_std[a]  = float(vals_r.std() + 1e-8)
+                    else:
+                        delta_mean[a] = float(vals.mean())
+                        delta_std[a]  = float(vals.std() + 1e-8)
 
-        # ── Normalise entire dataset ──────────────────────────────────────────
+            # Normalise deltas across the whole dataset
+            delta_all = dataset.targets - dataset.prior_targets
+            tgt_n     = ((delta_all - delta_mean[dataset.asset_ids])
+                         / delta_std[dataset.asset_ids]).astype(np.float32)
+            # Replace NaN/inf with 0 — valid_all masks them out of the loss,
+            # but 0 * NaN = NaN in IEEE 754 so the tensor must be finite.
+            tgt_n = np.where(np.isfinite(tgt_n), tgt_n, 0.0).astype(np.float32)
+
+            # Valid: T > 0 AND prior is finite
+            valid_all = ((dataset.query_feats[:, :, 1] > 0)
+                         & np.isfinite(dataset.prior_targets))
+        else:
+            # ── Per-asset log(IV) normalisation ───────────────────────────────
+            aids_train   = dataset.asset_ids[train_idx]
+            log_iv_train = np.log(np.maximum(dataset.targets[train_idx], 1e-8))
+            log_tgt_mean = np.zeros(n_assets, dtype=np.float32)
+            log_tgt_std  = np.ones(n_assets,  dtype=np.float32)
+            for a in range(n_assets):
+                mask_a = valid_tr & (aids_train == a)
+                vals   = log_iv_train[mask_a]
+                if len(vals) > 1:
+                    log_tgt_mean[a] = float(vals.mean())
+                    log_tgt_std[a]  = float(vals.std() + 1e-8)
+
+            # Normalise entire dataset
+            log_iv    = np.log(np.maximum(dataset.targets, 1e-8))
+            tgt_n     = ((log_iv - log_tgt_mean[dataset.asset_ids])
+                         / log_tgt_std[dataset.asset_ids]).astype(np.float32)
+            valid_all = (dataset.query_feats[:, :, 1] > 0)
+
+        # ── Feature normalisation (shared) ────────────────────────────────────
         feat_n = ((dataset.query_feats - feat_mean) / feat_std).astype(np.float32)
-        log_iv = np.log(np.maximum(dataset.targets, 1e-8))
-        tgt_n  = ((log_iv - log_tgt_mean[dataset.asset_ids]) /
-                  log_tgt_std[dataset.asset_ids]).astype(np.float32)
-
-        # ── Valid mask: T > 0 in raw query_feats means a real (non-padded) point ─
-        valid_all = (dataset.query_feats[:, :, 1] > 0)      # (N_days, P)
 
         feat_t  = torch.from_numpy(feat_n).to(dev)
         tgt_t   = torch.from_numpy(tgt_n).to(dev)
@@ -129,10 +185,11 @@ class Trainer:
                       f"{time.time()-t0:.0f}s")
 
         print(f"Training done in {time.time()-t0:.1f}s")
-        return (
-            FittedCNP(module, feat_mean, feat_std, log_tgt_mean, log_tgt_std),
-            {"train_rmse": train_rmse_hist, "val_rmse": val_rmse_hist},
-        )
+        if delta_mode:
+            fitted = FittedDeltaCNP(module, feat_mean, feat_std, delta_mean, delta_std)
+        else:
+            fitted = FittedCNP(module, feat_mean, feat_std, log_tgt_mean, log_tgt_std)
+        return fitted, {"train_rmse": train_rmse_hist, "val_rmse": val_rmse_hist}
 
 
 def _make_batch(feat_t, tgt_t, aid_t, valid_t, day_idx, n_ctx, ctx_max, dev):

@@ -5,6 +5,7 @@ import numpy as np
 from dgraph.experiments.comparison import ModelComparison, _node_label
 from dgraph.experiments.splitter import NodeMaskingSplitter
 from dgraph.losses.data import DataLoss
+from utils.pricing import bs_call_from_iv
 
 
 class SurfaceModelComparison(ModelComparison):
@@ -64,35 +65,47 @@ class SurfaceModelComparison(ModelComparison):
         for nid in all_nids:
             label = _node_label(nid)
 
-            train_pts = [
-                {
-                    "k":  round(float(o.data[0]), 5),
-                    "T":  round(float(o.data[1]), 5),
-                    "iv": round(float(o.data[2]) * 100, 4),
+            def _spt(o):
+                k_v   = float(o.data[0])
+                T_v   = float(o.data[1])
+                iv_v  = float(o.data[2])
+                bid_n = o.data[3] if len(o.data) > 3 else None
+                ask_n = o.data[4] if len(o.data) > 4 else None
+                d = {
+                    "k":    round(k_v,       5),
+                    "T":    round(T_v,       5),
+                    "iv":   round(iv_v * 100, 4),
+                    "call": round(float(bs_call_from_iv(iv_v, k_v, T_v)) * 100, 5),
                 }
-                for o in self._train_obs.for_node(nid)
-            ]
-            test_pts = [
-                {
-                    "k":  round(float(o.data[0]), 5),
-                    "T":  round(float(o.data[1]), 5),
-                    "iv": round(float(o.data[2]) * 100, 4),
-                }
+                if bid_n is not None:
+                    d["bid"] = round(float(bid_n) * 100, 5)
+                if ask_n is not None:
+                    d["ask"] = round(float(ask_n) * 100, 5)
+                return d
+
+            train_pts = [_spt(o) for o in self._train_obs.for_node(nid)]
+            test_pts  = [
+                _spt(o)
                 for o in self._test_obs.for_node(nid)
                 if id(o) not in train_ids
             ]
 
             model_surfaces: dict = {}
+            call_surfaces:  dict = {}
             for mname, graph in self._graphs.items():
                 if nid not in graph.nodes:
                     continue
                 state = graph.get(nid)
                 try:
-                    iv_flat = state.implied_vol(K_flat, T_flat) * 100.0
-                    iv_2d = iv_flat.reshape(self.n_T, self.n_k)
+                    iv_flat   = state.implied_vol(K_flat, T_flat)
+                    call_flat = state.call_price(K_flat, T_flat) * 100.0
+                    iv_2d   = (iv_flat * 100.0).reshape(self.n_T, self.n_k)
+                    call_2d = call_flat.reshape(self.n_T, self.n_k)
                     model_surfaces[mname] = [
-                        [round(float(v), 4) for v in row]
-                        for row in iv_2d
+                        [round(float(v), 4) for v in row] for row in iv_2d
+                    ]
+                    call_surfaces[mname] = [
+                        [round(float(v), 5) for v in row] for row in call_2d
                     ]
                 except Exception:
                     pass
@@ -101,7 +114,8 @@ class SurfaceModelComparison(ModelComparison):
                 "k_grid": [round(float(v), 5) for v in k_grid],
                 "T_grid": [round(float(v), 5) for v in T_grid],
                 "obs": {"train": train_pts, "test": test_pts},
-                "models": model_surfaces,
+                "models":       model_surfaces,
+                "call_models":  call_surfaces,
             }
 
         return {"surface_data": surface_data}
@@ -200,6 +214,7 @@ function populateTSelect(nodeId) {
     Math.abs(T - 0.5) < Math.abs(sd.T_grid[best] - 0.5) ? i : best, 0);
   sel.value = midIdx;
   renderSmileSlice(nodeId, midIdx);
+  renderCallSmileSlice(nodeId, midIdx);
 }
 
 // ---------- 2-D smile slice ----------
@@ -253,6 +268,81 @@ function renderSmileSlice(nodeId, tIdx) {
     plot_bgcolor: '#fafafa',
   }, {responsive:true, displayModeBar:false});
 }
+
+// ---------- Call price slice ----------
+function renderCallSmileSlice(nodeId, tIdx) {
+  const sd = D.surface_data && D.surface_data[nodeId];
+  if (!sd) return;
+  const T = sd.T_grid[tIdx];
+
+  const traces = [];
+  const bw = T * 0.30;
+
+  const trainNear = sd.obs.train.filter(o => Math.abs(o.T - T) <= bw);
+  const testNear  = sd.obs.test.filter(o  => Math.abs(o.T - T) <= bw);
+
+  function withField(arr, f) { return arr.filter(o => o[f] !== undefined); }
+
+  // Train bid / ask
+  const trBid = withField(trainNear, 'bid');
+  const trAsk = withField(trainNear, 'ask');
+  if (trBid.length > 0) {
+    traces.push({
+      x: trBid.map(o => o.k), y: trBid.map(o => o.bid),
+      mode: 'markers', name: 'Bid (train)',
+      marker: {symbol:'triangle-down', size:7, color:'#1565C0', opacity:0.75},
+    });
+  }
+  if (trAsk.length > 0) {
+    traces.push({
+      x: trAsk.map(o => o.k), y: trAsk.map(o => o.ask),
+      mode: 'markers', name: 'Ask (train)',
+      marker: {symbol:'triangle-up', size:7, color:'#B71C1C', opacity:0.75},
+    });
+  }
+
+  // Test bid / ask
+  const teBid = withField(testNear, 'bid');
+  const teAsk = withField(testNear, 'ask');
+  if (teBid.length > 0) {
+    traces.push({
+      x: teBid.map(o => o.k), y: teBid.map(o => o.bid),
+      mode: 'markers', name: 'Bid (test)',
+      marker: {symbol:'triangle-down-open', size:9, color:'#0D47A1',
+               line:{color:'#0D47A1', width:1.5}},
+    });
+  }
+  if (teAsk.length > 0) {
+    traces.push({
+      x: teAsk.map(o => o.k), y: teAsk.map(o => o.ask),
+      mode: 'markers', name: 'Ask (test)',
+      marker: {symbol:'triangle-up-open', size:9, color:'#B71C1C',
+               line:{color:'#B71C1C', width:1.5}},
+    });
+  }
+
+  const COLORS = ['#2196F3','#E64A19','#388E3C','#7B1FA2','#F57C00'];
+  D.model_names.forEach((m, i) => {
+    const z = sd.call_models && sd.call_models[m];
+    if (!z) return;
+    traces.push({
+      x: sd.k_grid, y: z[tIdx],
+      mode: 'lines', name: m,
+      line: {color: COLORS[i % COLORS.length], width: 2},
+    });
+  });
+
+  Plotly.react('call-slice-div', traces, {
+    xaxis: {title:'Log-moneyness', zeroline:true,
+            zerolinecolor:'#ddd', zerolinewidth:1},
+    yaxis: {title:'Call Price (% of forward, discount=1)'},
+    title: {text:'Call price slice  T ≈ ' + T.toFixed(3) + ' yr', font:{size:13}},
+    legend: {orientation:'h', y:-0.28, font:{size:11}},
+    margin: {t:40, b:90, l:65, r:20},
+    height: 320,
+    plot_bgcolor: '#fafafa',
+  }, {responsive:true, displayModeBar:false});
+}
 </script>"""
 
     def _extra_node_html(self) -> str:
@@ -261,9 +351,10 @@ function renderSmileSlice(nodeId, tIdx) {
 <div class="slice-row">
   <label>Smile slice:</label>
   <select id="T-select"
-          onchange="renderSmileSlice(_surfaceNodeId, +this.value)"></select>
+          onchange="renderSmileSlice(_surfaceNodeId, +this.value); renderCallSmileSlice(_surfaceNodeId, +this.value)"></select>
 </div>
-<div id="smile-slice-div"></div>"""
+<div id="smile-slice-div"></div>
+<div id="call-slice-div" style="margin-top:14px;"></div>"""
 
     def _extra_init_js(self) -> str:
         return "renderSurfacePlot(nodeId); populateTSelect(nodeId);"

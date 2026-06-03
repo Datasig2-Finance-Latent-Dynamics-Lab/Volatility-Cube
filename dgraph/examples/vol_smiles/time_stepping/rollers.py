@@ -2,63 +2,20 @@ import numpy as np
 import pandas as pd
 
 from dgraph.source.graph import Graph
-from dgraph.time_stepping.roller import Roller
+from dgraph.time_stepping.roller import Roller, decay_precision
 from ..source.curves.bspline import BSplineState
 from ..source.curves.svi import SviRawState, SviJWState
 
-# TODO: The roller class may need to be rethough, having so many isinstance kids violates DRY.
-# Maybe rolling incuded in state?
-
-
-def _decay_precision(state, dt: float):
-    """
-    Decay node precision exponentially with time: Λ → Λ · exp(−dt).
-    Returns a copy of the state but with changed precision.
-    """
-    return state.with_precision(state.precision * np.exp(-dt))
+# In general not a fan of how rolling is handled, each rolling basically has an if per state type and they get rolled
+# differently, at this points it's maybe better to simply have a state method called roll, which would then have 
+# a different if based on each roller type xd. I am not too sure how to solve this.
 
 
 class VolRoller(Roller):
 
     """
-    Evolves state by simply changing the time to expiry T and nothing else.
-    """
-
-    def roll(self, graph: Graph, dt: float) -> Graph:
-        new_nodes: dict = {}
-        for nid, state in graph.nodes.items():
-            T_new = state.T - dt
-
-            if isinstance(state, BSplineState):
-                new_state = state.with_T(T_new)
-            elif isinstance(state, SviJWState):
-                try:
-                    new_state = state.to_raw().to_jw(T_new)
-                except (ValueError, FloatingPointError):
-                    new_state = state.with_T(T_new)
-            elif isinstance(state, SviRawState):
-                new_state = state.with_T(T_new)
-            else:
-                new_state = state.copy()
-
-            new_nodes[nid] = _decay_precision(new_state, dt)
-
-        return Graph(graph.date + pd.Timedelta(days=round(dt * 365)), new_nodes, graph.edges)
-
-
-class StickyStrikeRoller(Roller):
-    # TODO: I don't think this is correct.
-
-    """
-    Temporal prior assuming sticky-strike dynamics: implied vol at each absolute
-    strike K is unchanged as time passes.
-
-    In log-moneyness space, this means total variance w(k) is
-    unchanged, so implied vol changes as √(w/T_new).
-
-    - SviRawState: parameters (a, b, rho, m, sigma) are carried forward unchanged.
-    - SviJWState:  total variance preserved; T updated; v and v_tilde scale by T_old/T_new.
-    - BSplineState: coefficients scaled by √(T_old / T_new).
+    Evolves state preserving total variance at each log-moneyness level: w(k) = σ²T unchanged,
+    so σ scales as √(T_old/T_new) as the expiry approaches.
     """
 
     def roll(self, graph: Graph, dt: float) -> Graph:
@@ -80,7 +37,7 @@ class StickyStrikeRoller(Roller):
             else:
                 new_state = state.copy()
 
-            new_nodes[nid] = _decay_precision(new_state, dt)
+            new_nodes[nid] = decay_precision(new_state, dt)
 
         return Graph(graph.date + pd.Timedelta(days=round(dt * 365)), new_nodes, graph.edges)
 
@@ -127,6 +84,6 @@ class StickyDeltaRoller(Roller):
             else:
                 new_state = state.copy()
 
-            new_nodes[nid] = _decay_precision(new_state, dt)
+            new_nodes[nid] = decay_precision(new_state, dt)
 
         return Graph(graph.date + pd.Timedelta(days=round(dt * 365)), new_nodes, graph.edges)

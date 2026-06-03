@@ -23,8 +23,8 @@ class SSVISurfaceState(SurfaceState):
     Parameters: (v_0, v_inf, kappa, rho, eta, gamma)
 
     Sufficient no-static-arbitrage conditions (Gatheral-Jacquier):
-        0 < γ ≤ 1/2
-        η · (1 + |ρ|) ≤ 2
+        0 < γ ≤ 1/2,
+        η · (1 + ``|ρ|``) ≤ 2,
         θ(T) strictly increasing  ← satisfied when v_0, v_inf, κ > 0
     """
 
@@ -41,17 +41,40 @@ class SSVISurfaceState(SurfaceState):
     # ------------------------------------------------------------------
 
     def theta(self, T: float | np.ndarray) -> np.ndarray:
-        """ATM total variance at maturity T."""
+        """TODO.
+
+        Args:
+            T: TODO.
+
+        Returns:
+            TODO.
+        """
         T = np.asarray(T, dtype=float)
         kappa = max(self.kappa, 1e-10)
         return self.v_inf * T + (self.v_0 - self.v_inf) * (1.0 - np.exp(-kappa * T)) / kappa
 
     def phi(self, theta_T: np.ndarray) -> np.ndarray:
-        """Power-law wing function evaluated at θ(T)."""
+        """TODO.
+
+        Args:
+            theta_T: TODO.
+
+        Returns:
+            TODO.
+        """
         theta_T = np.maximum(theta_T, 1e-12)
         return self.eta / (theta_T ** self.gamma * (1.0 + theta_T) ** (1.0 - self.gamma))
 
     def total_variance(self, k: float | np.ndarray, T: float | np.ndarray) -> np.ndarray:
+        """TODO.
+
+        Args:
+            k: TODO.
+            T: TODO.
+
+        Returns:
+            TODO.
+        """
         k = np.asarray(k, dtype=float)
         T = np.asarray(T, dtype=float)
         theta_T = self.theta(T)
@@ -66,12 +89,26 @@ class SSVISurfaceState(SurfaceState):
 
     @property
     def n_params(self) -> int:
+        """TODO."""
         return 6
 
     def parameters(self) -> np.ndarray:
+        """TODO.
+
+        Returns:
+            TODO.
+        """
         return np.array([self.v_0, self.v_inf, self.kappa, self.rho, self.eta, self.gamma])
 
     def from_parameters(self, params: np.ndarray) -> "SSVISurfaceState":
+        """TODO.
+
+        Args:
+            params: TODO.
+
+        Returns:
+            TODO.
+        """
         return SSVISurfaceState(
             v_0=params[0], v_inf=params[1], kappa=params[2],
             rho=params[3], eta=params[4], gamma=params[5],
@@ -79,12 +116,22 @@ class SSVISurfaceState(SurfaceState):
         )
 
     def copy(self) -> "SSVISurfaceState":
+        """TODO.
+
+        Returns:
+            TODO.
+        """
         return SSVISurfaceState(
             self.v_0, self.v_inf, self.kappa,
             self.rho, self.eta, self.gamma, self.precision,
         )
 
     def bounds(self) -> list[tuple[float | None, float | None]]:
+        """TODO.
+
+        Returns:
+            TODO.
+        """
         return [
             (1e-6, None),    # v_0
             (1e-6, None),    # v_inf

@@ -17,13 +17,51 @@ class SurfaceState(State):
 
     @abstractmethod
     def total_variance(self, k: float | np.ndarray, T: float | np.ndarray) -> np.ndarray:
-        """Total variance w(k, T) = σ²(k, T) · T."""
+        """TODO.
+
+        Args:
+            k: TODO.
+            T: TODO.
+
+        Returns:
+            TODO.
+        """
         ...
 
     def implied_vol(self, k: float | np.ndarray, T: float | np.ndarray) -> np.ndarray:
+        """TODO.
+
+        Args:
+            k: TODO.
+            T: TODO.
+
+        Returns:
+            TODO.
+        """
         T_arr = np.asarray(T, dtype=float)
         w = self.total_variance(k, T_arr)
         return np.sqrt(np.maximum(w, 1e-12) / np.maximum(T_arr, 1e-12))
+
+    def call_price(
+        self,
+        k: float | np.ndarray,
+        T: float | np.ndarray,
+        forward: float = 1.0,
+        discount: float = 1.0,
+    ) -> np.ndarray:
+        """TODO.
+
+        Args:
+            k: TODO.
+            T: TODO.
+            forward: TODO.
+            discount: TODO.
+
+        Returns:
+            TODO.
+        """
+        from utils.pricing import bs_call_from_iv
+        return bs_call_from_iv(self.implied_vol(k, T), k, T, forward, discount)
 
     def plot(
         self,
@@ -35,6 +73,20 @@ class SurfaceState(State):
         pct: bool = True,
         **kwargs,
     ):
+        """TODO.
+
+        Args:
+            T_values: TODO.
+            k_min: TODO.
+            k_max: TODO.
+            n_points: TODO.
+            ax: TODO.
+            pct: TODO.
+            **kwargs: TODO.
+
+        Returns:
+            TODO.
+        """
         import matplotlib.pyplot as plt
 
         k_grid = np.linspace(k_min, k_max, n_points)

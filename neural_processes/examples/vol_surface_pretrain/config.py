@@ -23,7 +23,7 @@ class GroupTechDataConfig:
     csv_path:     str       = CSV_PATH
     n_train_days: int | None = None
     n_val_days:   int | None = None
-    val_frac:     float     = 0.15
+    n_eval_days:  int = 5             # last N calendar dates used for evaluation
 
 
 # ── Architecture (shared between pre-train and fine-tune phases) ──────────────
@@ -50,20 +50,20 @@ class ModelConfig:
 @dataclass
 class PretrainTrainConfig:
     """Heston pre-training — 75 epochs is plenty given 5000 days of synthetic data."""
-    n_epochs:   int   = 75
+    n_epochs:   int   = 100
     batch_size: int   = 32
     lr:         float = 3e-4
-    ctx_min:    int   = 3
+    ctx_min:    int   = 10   # was 3 — more realistic minimum context
     log_every:  int   = 10
 
 
 @dataclass
 class FineTuneTrainConfig:
     """Group Tech fine-tune — lower LR preserves the pre-trained transformer weights."""
-    n_epochs:   int   = 75
+    n_epochs:   int   = 100
     batch_size: int   = 32
     lr:         float = 5e-5
-    ctx_min:    int   = 3
+    ctx_min:    int   = 10   # was 3 — more realistic minimum context
     log_every:  int   = 10
 
 
@@ -73,6 +73,7 @@ class AnalyticsConfig:
     ctx_sizes_rmse_curve: list = field(default_factory=lambda: [5, 20, 50, 100, 200])
     n_ctx_per_maturity:   int  = 100
     n_ctx_zeroshot:       int  = 50
+    n_ctx_latent:         int  = 200
 
 
 # ── Top-level config ──────────────────────────────────────────────────────────

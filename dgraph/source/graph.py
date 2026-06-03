@@ -10,8 +10,11 @@ class Graph:
     """
     A graph of parametric node states connected by directed edges.
 
-    nodes : dict[NodeId, State]                          — node states
-    edges : dict[tuple[NodeId, NodeId], EdgeState]       — directed edge states
+    Attributes:
+        date (pd:Timestamp): Time of the graph.
+        nodes (dict[NodeId, State]): Stores the nodes states.
+        edges (dict[tuple[NodeId, NodeId], EdgeState]): Stores the edge states.
+        _node_order (list[NodeId]): Keeps an order of NodeIds for graph reconstruction.
     """
 
     def __init__(
@@ -26,14 +29,21 @@ class Graph:
         self._node_order: list[NodeId] = list(nodes.keys())
 
     def to_vector(self) -> np.ndarray:
-        """
-        Turns the whole graph into a vector so that we can use scpy minimize.
+        """Vectorizes the whole graph. Needed to use scipy's minimize.
+
+        Returns:
+            np.ndarray
         """
         return np.concatenate(
             [self.nodes[nid].parameters() for nid in self._node_order]
         )
 
     def parameter_bounds(self) -> list[tuple[float | None, float | None]] | None:
+        """Vectorizes all the bounds for parameters in appropiate order.
+
+        Returns:
+            list
+        """
         all_bounds = []
         for nid in self._node_order:
             b = self.nodes[nid].bounds()
@@ -43,8 +53,13 @@ class Graph:
         return all_bounds
 
     def from_vector(self, v: np.ndarray) -> "Graph":
-        """
-        Reconstructs a graph with the same nodes and types from a vector.
+        """Reconstructs a graph with same nodes from a vector.
+
+        Args:
+            v (np.ndarray): Vector to reconstruct from
+
+        Returns:
+            Graph
         """
         new_nodes: dict[NodeId, State] = {}
         offset = 0
@@ -56,19 +71,27 @@ class Graph:
         return Graph(self.date, new_nodes, self.edges)
 
     def get(self, node_id: NodeId) -> State:
-        """
-        Returns state at a specific node.
+        """Gets state at a node.
+
+        Args:
+            node_id
+
+        Returns:
+            State
         """
         return self.nodes[node_id]
 
     def get_edge(self, src: NodeId, tgt: NodeId) -> EdgeState | None:
-        """
-        Returns edgestate at specific edge.
+        """Gets state at an edge.
+
+        Args:
+            src (NodeId): Id of the source of the edge.
+            tgt (NodeId): Id of the target of the edge.
+
+        Returns:
+            EdgeState
         """
         return self.edges.get((src, tgt))
 
     def node_ids(self) -> list[NodeId]:
-        """
-        Makes an ordered list of the nodes. nEeded for consistency.
-        """
         return list(self._node_order)

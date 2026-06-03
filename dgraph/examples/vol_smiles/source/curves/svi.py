@@ -19,14 +19,24 @@ class SviRawState(CurveState):
     precision: float | np.ndarray = field(default=1.0, hash=False, compare=False)
 
     def with_T(self, new_T: float) -> "SviRawState":
-        """
-        Returns the same state with a different time to expiry.
+        """TODO.
+
+        Args:
+            new_T: TODO.
+
+        Returns:
+            TODO.
         """
         return SviRawState(self.a, self.b, self.rho, self.m, self.sigma, new_T, self.precision)
 
     def to_jw(self, T: float | None = None) -> "SviJWState":
-        """
-        Turns the state into one parametrized by JW parameters.
+        """TODO.
+
+        Args:
+            T: TODO.
+
+        Returns:
+            TODO.
         """
         T = T if T is not None else self.T
         hyp = np.sqrt(self.m ** 2 + self.sigma ** 2)
@@ -42,14 +52,25 @@ class SviRawState(CurveState):
 
     @property
     def n_params(self) -> int:
+        """TODO."""
         return 5
 
     def parameters(self) -> np.ndarray:
+        """TODO.
+
+        Returns:
+            TODO.
+        """
         return np.array([self.a, self.b, self.rho, self.m, self.sigma])
 
     def from_parameters(self, params: np.ndarray) -> "SviRawState":
-        """
-        Creates a raw svi state with equalt time to expiry and precision but different parameters.
+        """TODO.
+
+        Args:
+            params: TODO.
+
+        Returns:
+            TODO.
         """
         return SviRawState(
             a=params[0], b=params[1], rho=params[2], m=params[3], sigma=params[4],
@@ -57,9 +78,19 @@ class SviRawState(CurveState):
         )
 
     def copy(self) -> "SviRawState":
+        """TODO.
+
+        Returns:
+            TODO.
+        """
         return SviRawState(self.a, self.b, self.rho, self.m, self.sigma, self.T, self.precision)
 
     def bounds(self) -> list[tuple[float | None, float | None]]:
+        """TODO.
+
+        Returns:
+            TODO.
+        """
         return [
             (1e-8, None),    # a
             (1e-8, None),    # b
@@ -69,6 +100,14 @@ class SviRawState(CurveState):
         ]
 
     def total_variance(self, k: float | np.ndarray) -> float | np.ndarray:
+        """TODO.
+
+        Args:
+            k: TODO.
+
+        Returns:
+            TODO.
+        """
         k = np.asarray(k)
         w = self.a + self.b * (
             self.rho * (k - self.m) + np.sqrt((k - self.m) ** 2 + self.sigma ** 2)
@@ -91,11 +130,21 @@ class SviJWState(CurveState):
     precision: float | np.ndarray = field(default=1.0, hash=False, compare=False)
 
     def with_T(self, new_T: float) -> "SviJWState":
+        """TODO.
+
+        Args:
+            new_T: TODO.
+
+        Returns:
+            TODO.
+        """
         return SviJWState(self.v, self.psi, self.p, self.c, self.v_tilde, new_T, self.precision)
 
     def to_raw(self) -> SviRawState:
-        """
-        Returns the same state parametrized by raw svi.
+        """TODO.
+
+        Returns:
+            TODO.
         """
         w_t = self.v * self.T
         b = (self.c + self.p) / 2.0
@@ -127,21 +176,45 @@ class SviJWState(CurveState):
 
     @property
     def n_params(self) -> int:
+        """TODO."""
         return 5
 
     def parameters(self) -> np.ndarray:
+        """TODO.
+
+        Returns:
+            TODO.
+        """
         return np.array([self.v, self.psi, self.p, self.c, self.v_tilde])
 
     def from_parameters(self, params: np.ndarray) -> "SviJWState":
+        """TODO.
+
+        Args:
+            params: TODO.
+
+        Returns:
+            TODO.
+        """
         return SviJWState(
             v=params[0], psi=params[1], p=params[2], c=params[3], v_tilde=params[4],
             T=self.T, precision=self.precision,
         )
 
     def copy(self) -> "SviJWState":
+        """TODO.
+
+        Returns:
+            TODO.
+        """
         return SviJWState(self.v, self.psi, self.p, self.c, self.v_tilde, self.T, self.precision)
 
     def bounds(self) -> list[tuple[float | None, float | None]]:
+        """TODO.
+
+        Returns:
+            TODO.
+        """
         return [
             (1e-8, None),    # v
             (-0.5, 0.5),     # psi
@@ -151,6 +224,14 @@ class SviJWState(CurveState):
         ]
 
     def total_variance(self, k: float | np.ndarray) -> float | np.ndarray:
+        """TODO.
+
+        Args:
+            k: TODO.
+
+        Returns:
+            TODO.
+        """
         if self.v_tilde > self.v:
             # Minimum variance exceeds ATM variance — physically invalid.
             return np.full_like(np.asarray(k, dtype=float), 1e10)

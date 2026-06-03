@@ -15,6 +15,15 @@ class SurfaceModel(ABC):
         obs_feats: np.ndarray,   # (B, n_ctx, Q_dim)
         obs_aids: np.ndarray,    # (B, n_ctx)  int
     ) -> np.ndarray:             # (B, N_assets, D_latent)
+        """TODO.
+
+        Args:
+            obs_feats: TODO.
+            obs_aids: TODO.
+
+        Returns:
+            TODO.
+        """
         ...
 
     @abstractmethod
@@ -26,6 +35,18 @@ class SurfaceModel(ABC):
         qry_feats: np.ndarray,   # (B, Q, Q_dim)
         qry_aids: np.ndarray,    # (B, Q)  int
     ) -> np.ndarray:             # (B, Q)  — denormalised
+        """TODO.
+
+        Args:
+            obs_feats: TODO.
+            obs_aids: TODO.
+            obs_tgts: TODO.
+            qry_feats: TODO.
+            qry_aids: TODO.
+
+        Returns:
+            TODO.
+        """
         ...
 
     @abstractmethod
@@ -35,11 +56,36 @@ class SurfaceModel(ABC):
         qry_feats: np.ndarray,   # (B, Q, Q_dim)
         qry_aids: np.ndarray,    # (B, Q)  int
     ) -> np.ndarray:             # (B, Q)  — denormalised
+        """TODO.
+
+        Args:
+            z: TODO.
+            qry_feats: TODO.
+            qry_aids: TODO.
+
+        Returns:
+            TODO.
+        """
         ...
 
     @abstractmethod
-    def save(self, path: str) -> None: ...
+    def save(self, path: str) -> None:
+        """TODO.
+
+        Args:
+            path: TODO.
+        """
+        ...
 
     @classmethod
     @abstractmethod
-    def load(cls, path: str) -> "SurfaceModel": ...
+    def load(cls, path: str) -> "SurfaceModel":
+        """TODO.
+
+        Args:
+            path: TODO.
+
+        Returns:
+            TODO.
+        """
+        ...

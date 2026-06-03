@@ -13,7 +13,14 @@ class Splitter(ABC):
     """
     @abstractmethod
     def split(self, obs_set: ObservationSet) -> tuple[ObservationSet, ObservationSet]:
-        """Performs the splitting of observation sets into two different ones."""
+        """Splits the observations.
+
+        Args:
+            obs_set (ObservationSet)
+
+        Returns:
+            tuple
+        """
         ...
 
 
@@ -21,11 +28,25 @@ class RandomSplitter(Splitter):
     """
     Splits observations randmoly with no further restrictions.
     """
+
     def __init__(self, train_frac: float = 0.5, seed: int = 67):
+        """
+        Args:
+            train_frac (float): Proportion of observations to use for fitting.
+            seed (int): Randomness seed.
+        """
         self.train_frac = train_frac
         self.seed = seed
 
     def split(self, obs_set: ObservationSet) -> tuple[ObservationSet, ObservationSet]:
+        """Splits the observations.
+
+        Args:
+            obs_set (ObservationSet)
+
+        Returns:
+            tuple
+        """
         rng = random.Random(self.seed)
         obs = list(obs_set.observations)
         rng.shuffle(obs)
@@ -47,12 +68,26 @@ class NodeMaskingSplitter(Splitter):
         train_frac: float = 0.7,
         seed: int = 67,
     ):
+        """
+        Args:
+            node_mask_prob: Probability to mask each node.
+            train_frac: Fraction used for fitting.
+            seed: Randomness seed.
+        """
         self.node_mask_prob = node_mask_prob
         self.train_frac = train_frac
         self.seed = seed
         self.masked_nodes: set[NodeId] = set()
 
     def split(self, obs_set: ObservationSet) -> tuple[ObservationSet, ObservationSet]:
+        """Splits the observations.
+
+        Args:
+            obs_set (ObservationSet)
+
+        Returns:
+            tuple
+        """
         date_seed = self.seed + int(obs_set.date.value // 10**9) # Keeps things reproducible.
         rng = random.Random(date_seed)
 

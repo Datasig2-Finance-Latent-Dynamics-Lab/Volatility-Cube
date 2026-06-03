@@ -44,8 +44,8 @@ from dgraph.examples.vol_surface.time_stepping.rollers import SurfaceRoller
 # Config
 # =========================================================================
 
-# Data split
-N_TRAIN = 1000
+# Data split — train on all dates except the last N_EVAL_DAYS
+N_EVAL_DAYS = 5
 
 # PCA basis
 N_PCA_COMPONENTS = 5
@@ -69,13 +69,15 @@ PCA_GRAPH_LAMBDA_GRAPH       = 0.05
 
 # Splitter
 NODE_MASK_PROB = 0.1
-TRAIN_FRAC     = 0.05
+TRAIN_FRAC     = 0.10   # was 0.05 — more obs per update, same runtime
 
 # Input 
 DATA_PATH = "/home/alvaro/projects/dissertation/data/scripts/bulk_download/output/group_tech_us.csv"
 
 # Output
-OUT_PATH = "results/vol_surface_dgraph/vol_surface_comparison.html"
+OUT_PATH     = "results/vol_surface_dgraph/vol_surface_comparison.html"
+METRICS_PATH = "results/vol_surface_dgraph/vol_surface_metrics.json"
+RESULTS_CSV  = "results/experiment_results.csv"
 
     # =========================================================================
 
@@ -293,16 +295,17 @@ def main() -> None:
 
     underlyings = sorted(df["underlying"].unique())
     dates       = sorted(df["date"].unique())
-    train_dates = dates[:N_TRAIN]
-    test_dates  = dates[N_TRAIN:]
+    train_dates = dates[:-N_EVAL_DAYS]           # all but last 5 days
+    test_dates  = dates[-(N_EVAL_DAYS + 1):]     # last 5 eval days + 1 init day
 
     print(f"Underlyings  : {underlyings}")
-    print(f"Train / Test : {len(train_dates)} / {len(test_dates) - 1} dates")
+    print(f"Total dates  : {len(dates)}")
+    print(f"Train / Eval : {len(train_dates)} / {N_EVAL_DAYS} dates")
 
     # PCA basis must be fitted before model specs are created
     k_grid = np.linspace(df["logmoneyness"].quantile(0.02), df["logmoneyness"].quantile(0.98), N_K_GRID)
     T_grid = np.exp(np.linspace(np.log(df["T"].min()), np.log(df["T"].max()), N_T_GRID))
-    print(f"\nFitting PCA basis on {N_TRAIN} training dates…")
+    print(f"\nFitting PCA basis on {len(train_dates)} training dates…")
     pca = fit_surface_pca(df, train_dates, underlyings, k_grid, T_grid, n_components=N_PCA_COMPONENTS)
     cumvar = pca.explained_variance_ratio_.cumsum()
     for i, (ev, cum) in enumerate(zip(pca.explained_variance_ratio_, cumvar)):
@@ -431,11 +434,11 @@ def main() -> None:
     experiment.train(train_dates)
     print("Training complete.\n")
 
-    print(f"Running rolling experiment ({len(test_dates) - 1} transitions)…")
+    print(f"Running rolling experiment over {N_EVAL_DAYS} eval dates…")
     experiment.run(test_dates)
 
-    comparison.print_table("Vol Surface — Model Comparison (last test date)")
-
+    comparison.print_table("Vol Surface — Model Comparison")
+    comparison.save_metrics(METRICS_PATH, results_csv=RESULTS_CSV, experiment="vol_surface_dgraph")
     comparison.to_html(OUT_PATH, title="Vol Surface — Model Comparison")
 
 

@@ -18,12 +18,26 @@ class SurfaceObservationFactory:
     """Builds an ObservationSet for a single date. Each observation carries (k, T, iv)."""
 
     def __init__(self, underlyings: list[str]):
+        """TODO.
+
+        Args:
+            underlyings: TODO.
+        """
         self.underlyings = underlyings
 
     def build(self, df: pd.DataFrame, date: pd.Timestamp) -> ObservationSet:
+        """TODO.
 
+        Args:
+            df: TODO.
+            date: TODO.
+
+        Returns:
+            TODO.
+        """
         day_df = df[df["date"] == date]
         observations: list[Observation] = []
+        has_quotes = {"bid", "ask", "forward", "discount"}.issubset(day_df.columns)
 
         for underlying in self.underlyings:
             u_df = day_df[day_df["underlying"] == underlying]
@@ -31,8 +45,15 @@ class SurfaceObservationFactory:
                 continue
             nid = SurfaceNode(underlying)
             for _, row in u_df.iterrows():
+                if has_quotes:
+                    fwd_disc = float(row["forward"]) * float(row["discount"])
+                    bid_n = float(row["bid"]) / fwd_disc if fwd_disc > 0 else None
+                    ask_n = float(row["ask"]) / fwd_disc if fwd_disc > 0 else None
+                else:
+                    bid_n = ask_n = None
                 observations.append(
-                    Observation(nid, (row["logmoneyness"], row["T"], row["iv"]), float(row["weight"]))
+                    Observation(nid, (row["logmoneyness"], row["T"], row["iv"], bid_n, ask_n),
+                                float(row["weight"]))
                 )
 
         return ObservationSet(observations, date)
@@ -42,10 +63,25 @@ class SurfaceGraphFactory:
     """Builds a Graph with one SSVISurfaceState per underlying."""
 
     def __init__(self, underlyings: list[str], edges: dict | None = None):
+        """TODO.
+
+        Args:
+            underlyings: TODO.
+            edges: TODO.
+        """
         self.underlyings = underlyings
         self.edges = edges or {}
 
     def build(self, df: pd.DataFrame, date: pd.Timestamp) -> Graph:
+        """TODO.
+
+        Args:
+            df: TODO.
+            date: TODO.
+
+        Returns:
+            TODO.
+        """
         day_df = df[df["date"] == date]
         nodes: dict[SurfaceNode, SSVISurfaceState] = {}
 

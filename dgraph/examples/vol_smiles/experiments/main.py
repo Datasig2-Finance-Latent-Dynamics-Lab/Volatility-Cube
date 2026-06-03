@@ -1,12 +1,12 @@
 """
-Demonstrates dgraph.experiments with implied-vol smile models.
+Vol smile dependency graph experiment on Group Tech US market data.
 
-Model specs are compared on a (prior_date, test_date) pair.
+Trains on all dates except the last N_EVAL_DAYS, then evaluates on the last
+N_EVAL_DAYS with a rolling forward update. Metrics are aggregated across the
+eval window; plots are shown for the last eval day.
 
 Run:
     .venv/bin/python -m dgraph.examples.vol_smiles.experiments.main
-
-Results on html.
 """
 
 # Imports
@@ -23,6 +23,7 @@ from dgraph.losses.temporal import (
 )
 from dgraph.losses.graph import GraphLoss
 from dgraph.time_stepping.updater import SeparableGraphUpdater, GraphUpdater
+from dgraph.examples.vol_smiles.time_stepping.updater import BSplineUpdater
 from dgraph.experiments.experiment import Experiment, ModelSpec
 from dgraph.experiments.splitter import NodeMaskingSplitter
 
@@ -39,42 +40,47 @@ from dgraph.examples.vol_smiles.source.edges import build_tiered_smile_edges, bu
 # Configs
 
 LAMBDA_DATA = 4.0
-
 LAMBDA_TEMPORAL = 0.05
-
 LAMBDA_GRAPH = 0.05
-
 LAMBDA_NODE = 10000.0
-
-# Precision accumulated per unit observation weight after each SVI update.
-# Set to 2 * lambda_data so it stays on the same scale as the data Hessian.
 PRECISION_GAIN = 2.0 * LAMBDA_DATA
+NODE_MASK_FRAC = 0.3
+TRAIN_FRAC = 0.05  
 
-NODE_MASK_FRAC = 0.5
+N_EVAL_DAYS = 5  # last N days used for evaluation; everything else is training
 
-TRAIN_FRAC = 0.05
+DATA_PATH    = "/home/alvaro/projects/dissertation/data/scripts/bulk_download/output/group_tech_us.csv"
+OUT_PATH     = "results/vol_smiles_dgraph/vol_smiles_comparison.html"
+METRICS_PATH = "results/vol_smiles_dgraph/vol_smiles_metrics.json"
+RESULTS_CSV  = "results/experiment_results.csv"
 
 
 
 # Main
 
 def main() -> None:
-    DATA_PATH = "data/market/options_surface_sample.csv"
     df = pd.read_csv(DATA_PATH)
     df = df[df["type"] == "call"]
     df["date"]   = pd.to_datetime(df["date"])
     df["expiry"] = pd.to_datetime(df["expiry"])
 
-    underlyings = sorted(df["underlying"].unique())
-    expiries    = sorted(df["expiry"].unique())
-    dates       = sorted(df["date"].unique())[0:2]
+    all_dates  = sorted(df["date"].unique())
+    # 1 init day + N_EVAL_DAYS rolling eval days
+    test_dates = all_dates[-(N_EVAL_DAYS + 1):]
+
+    # Underlyings and expiries derived from the test window — avoids iterating
+    # over hundreds of already-expired options from the full history.
+    test_df     = df[df["date"].isin(set(test_dates))]
+    underlyings = sorted(test_df["underlying"].unique())
+    expiries    = sorted(test_df["expiry"].unique())
 
     tiered_edges   = build_tiered_smile_edges(underlyings, expiries)
     factored_edges = build_factored_smile_edges(underlyings, expiries)
 
     print(f"Underlyings    : {underlyings}")
-    print(f"Expiries       : {len(expiries)}")
-    print(f"Dates          : {dates[0].date()} to {dates[-1].date()} ({len(dates)} days)")
+    print(f"Total dates    : {len(all_dates)}")
+    print(f"Eval window    : {test_dates[1].date()} to {test_dates[-1].date()} ({N_EVAL_DAYS} days)")
+    print(f"Expiries       : {len(expiries)} (in eval window)")
     print(f"Tiered edges   : {len(tiered_edges)} directed edges")
     print(f"Factored edges : {len(factored_edges)} directed edges\n")
 
@@ -121,7 +127,7 @@ def main() -> None:
     svijw_temporal_graph_spec = ModelSpec(
         name="svijw_temporal_graph",
         build_graph=GraphFactory(underlyings, expiries, edges={}, fit_fn=fit_svi_jw).build,
-        updater=GraphUpdater(
+        updater=SeparableGraphUpdater(
             CombinedLoss(
                 data_loss=VolDataLoss(),
                 temporal_loss=temporal_loss,
@@ -148,17 +154,9 @@ def main() -> None:
         build_graph=GraphFactory(
             underlyings, expiries, edges={}, fit_fn=fit_bspline
         ).build,
-        updater=SeparableGraphUpdater(
-            CombinedLoss(
-                data_loss=VolDataLoss(),
-                temporal_loss=temporal_loss,
-                node_loss=bspline_node_loss,
-                lambda_data=LAMBDA_DATA,
-                lambda_temporal=LAMBDA_TEMPORAL,
-                lambda_node=LAMBDA_NODE,
-            ),
-            roller=VolRoller(),
-            precision_gain=PRECISION_GAIN,
+        updater=BSplineUpdater(
+            lambda_data=LAMBDA_DATA,
+            lambda_temporal=LAMBDA_TEMPORAL,
         ),
         roller=VolRoller(),
         static_edges={},
@@ -169,19 +167,10 @@ def main() -> None:
         build_graph=GraphFactory(
             underlyings, expiries, edges={}, fit_fn=fit_bspline
         ).build,
-        updater=GraphUpdater(
-            CombinedLoss(
-                data_loss=VolDataLoss(),
-                temporal_loss=temporal_loss,
-                graph_loss=GraphLoss(),
-                node_loss=bspline_node_loss,
-                lambda_data=LAMBDA_DATA,
-                lambda_temporal=LAMBDA_TEMPORAL,
-                lambda_graph=LAMBDA_GRAPH,
-                lambda_node=LAMBDA_NODE,
-            ),
-            roller=VolRoller(),
-            precision_gain=PRECISION_GAIN,
+        updater=BSplineUpdater(
+            lambda_data=LAMBDA_DATA,
+            lambda_temporal=LAMBDA_TEMPORAL,
+            lambda_graph=LAMBDA_GRAPH,
         ),
         roller=VolRoller(),
         static_edges=tiered_edges,
@@ -224,11 +213,13 @@ def main() -> None:
         output_fn=comparison,
     )
 
-    print(f"Running sequential experiment over {len(dates)} days...")
-    result = experiment.run(dates)[-1]
-    result.print_table("Vol Smiles — Model Comparison")
+    print(f"Running rolling experiment over {N_EVAL_DAYS} eval dates…")
+    experiment.run(test_dates)
+
+    comparison.print_table("Vol Smiles — Model Comparison")
     print("(Masked column: nodes with zero train observations — tests cross-asset imputation)")
-    result.to_html("results/vol_smiles_dgraph/vol_smiles_comparison.html", title="Vol Smiles — Model Comparison")
+    comparison.save_metrics(METRICS_PATH, results_csv=RESULTS_CSV, experiment="vol_smiles_dgraph")
+    comparison.to_html(OUT_PATH, title="Vol Smiles — Model Comparison")
 
 
 if __name__ == "__main__":

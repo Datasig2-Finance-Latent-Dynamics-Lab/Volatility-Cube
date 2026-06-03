@@ -15,11 +15,12 @@ def build_tiered_smile_edges(
 ) -> dict:
     """
     Connect same-expiry nodes across underlyings with tiered DeltaEdgeState precision.
+    in this cases DeltEdgeState just stores a scalar.
 
     Precision weights encode the idea that SPY leads individual stocks:
-      SPY → stock : high coupling  (SPY moves drive stock moves)
-      stock → SPY : low coupling   (individual stocks have little effect on SPY)
-      stock → stock : medium coupling
+      SPY to stock : high coupling  (SPY moves drive stock moves)
+      stock to SPY : low coupling   (individual stocks have little effect on SPY)
+      stock to stock : medium coupling
 
     """
     edges: dict = {}
@@ -51,7 +52,7 @@ def build_factored_smile_edges(
     stock_to_stock: float = 0.2,
 ) -> dict:
     """
-    
+    Attempt for nodes to depend on each other as in tiered edges but also including distance between maturities.
     """
     edges: dict = {}
 

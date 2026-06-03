@@ -15,7 +15,7 @@ class SviJWNodeLoss(NodeLoss):
     Two constraints that the box bounds alone cannot enforce:
 
       1. v_tilde <= v     (minimum variance must not exceed ATM variance)
-      2. -p < psi < c     (equivalent to |d| < 1, i.e. valid to_raw() conversion)
+      2. -p < psi < c     (equivalent to ``|d|`` < 1, i.e. valid to_raw() conversion)
 
     Both are penalised quadratically so the optimizer retains gradient
     information instead of hitting a flat 1e10 wall.  Non-JW nodes are
@@ -93,7 +93,8 @@ class CalendarSpreadPenalty:
     Soft calendar-spread no-arbitrage penalty applied to a whole graph.
 
     For each pair of consecutive maturities on the same underlying,
-    penalises any strike where total variance decreases with time:
+    penalises any strike where total variance decreases with time::
+
         penalty = sum_k max(w(k, T_i) - w(k, T_{i+1}), 0)^2   for T_i < T_{i+1}
 
     Not a NodeLoss (which acts per-node); call this directly on the graph

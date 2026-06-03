@@ -9,7 +9,7 @@ class SSVINodeLoss(NodeLoss):
     """
     Soft no-arbitrage penalty for SSVISurfaceState.
 
-    Enforces the Gatheral-Jacquier condition:  η · (1 + |ρ|) ≤ 2
+    Enforces the Gatheral-Jacquier condition:  η · (1 + ``|ρ|``) ≤ 2
     The box bounds keep γ ≤ 0.5 and v_0, v_inf, κ > 0, so this is
     the only inequality that the optimizer can violate in a non-trivial way.
     """

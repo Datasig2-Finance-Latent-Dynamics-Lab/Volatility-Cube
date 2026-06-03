@@ -22,8 +22,19 @@ class ObservationFactory:
         self.expiries = expiries
 
     def build(self, df: pd.DataFrame, date: pd.Timestamp) -> ObservationSet:
+        """Builds the observation set from a dataframe.
+
+        Args:
+            df: Dataframe to build from.
+            date: date to build at.
+
+        Returns:
+            ObservationSet
+        """
         day_df = df[df["date"] == date]
         observations: list[Observation] = []
+
+        has_quotes = {"bid", "ask", "forward", "discount"}.issubset(day_df.columns)
 
         for underlying in self.underlyings:
             for expiry in self.expiries:
@@ -33,8 +44,15 @@ class ObservationFactory:
                     continue
                 nid = CurveNode(underlying, expiry)
                 for _, row in slice_df.iterrows():
+                    if has_quotes:
+                        fwd_disc = float(row["forward"]) * float(row["discount"])
+                        bid_n = float(row["bid"]) / fwd_disc if fwd_disc > 0 else None
+                        ask_n = float(row["ask"]) / fwd_disc if fwd_disc > 0 else None
+                    else:
+                        bid_n = ask_n = None
                     observations.append(
-                        Observation(nid, (row["logmoneyness"], row["iv"]), float(row["weight"]))
+                        Observation(nid, (row["logmoneyness"], row["iv"], bid_n, ask_n),
+                                    float(row["weight"]))
                     )
 
         return ObservationSet(observations, date)
@@ -56,6 +74,15 @@ class GraphFactory:
         self.fit_fn = fit_fn if fit_fn is not None else fit_svi
 
     def build(self, df: pd.DataFrame, date: pd.Timestamp) -> Graph:
+        """Builds the graph from the dataframe.
+
+        Args:
+            df: Dataframe to build from.
+            date: date to build at.
+
+        Returns:
+            Graph
+        """
         day_df = df[df["date"] == date]
         nodes: dict[CurveNode, CurveState] = {}
 

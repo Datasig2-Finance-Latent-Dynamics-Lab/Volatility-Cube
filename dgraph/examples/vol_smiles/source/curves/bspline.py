@@ -27,8 +27,16 @@ class BSplineState(CurveState):
         n_interior: int = 9,
         degree: int = 3,
     ) -> np.ndarray:
-        """
-        Makes the knots for the BSpline.
+        """TODO.
+
+        Args:
+            k_min: TODO.
+            k_max: TODO.
+            n_interior: TODO.
+            degree: TODO.
+
+        Returns:
+            TODO.
         """
         interior = np.linspace(k_min, k_max, n_interior + 2)[1:-1]
         return np.concatenate([
@@ -39,28 +47,58 @@ class BSplineState(CurveState):
 
     @property
     def n_params(self) -> int:
+        """TODO."""
         return len(self.coeffs)
 
     def parameters(self) -> np.ndarray:
+        """TODO.
+
+        Returns:
+            TODO.
+        """
         return self.coeffs.copy()
 
     def from_parameters(self, params: np.ndarray) -> "BSplineState":
+        """TODO.
+
+        Args:
+            params: TODO.
+
+        Returns:
+            TODO.
+        """
         # Share the cache — knots/degree are identical so the basis rows are reusable.
         new = BSplineState(self.knots, self.degree, self.T, params.copy(), self.precision)
         new._dm_cache = self._dm_cache
         return new
 
     def copy(self) -> "BSplineState":
+        """TODO.
+
+        Returns:
+            TODO.
+        """
         return BSplineState(self.knots.copy(), self.degree, self.T, self.coeffs.copy(), self.precision)
 
     def with_T(self, new_T: float) -> "BSplineState":
-        """Return a copy with updated T (used by roller when time-to-expiry decreases)."""
+        """TODO.
+
+        Args:
+            new_T: TODO.
+
+        Returns:
+            TODO.
+        """
         new = BSplineState(self.knots, self.degree, new_T, self.coeffs.copy(), self.precision)
         new._dm_cache = self._dm_cache
         return new
 
     def bounds(self) -> list[tuple[float | None, float | None]]:
-        """Coefficient bounds are fairly general."""
+        """TODO.
+
+        Returns:
+            TODO.
+        """
         return [(1e-8, None)] * self.n_params
 
     def _basis(self, k: np.ndarray) -> np.ndarray:

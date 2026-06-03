@@ -6,6 +6,7 @@ import numpy as np
 
 from .state import State
 
+# No EdgeId needed since an EdgeId is just a tuple (NodeId,NodeId)
 
 class EdgeState(ABC):
     """
@@ -21,27 +22,35 @@ class EdgeState(ABC):
         rolled_i: State,
         rolled_j: State,
     ) -> np.ndarray:
-        """
-        Return the residual vector for this edge. If e:i -> j,
-        Usually of the form r(dv_j,dv_i). Where dv means increment of state.
+        """Gets r from two nodes.
+
+        Args:
+            state_i (State): New State for node i.
+            state_j (State): New State for node j.
+            rolled_i (State): Rolled State for node i.
+            rolled_j (State): Rolled State for node j.
+
+        Returns:
+            np.ndarray
         """
         ...
 
     @property
     @abstractmethod
     def precision(self) -> float | np.ndarray:
-        """
-        Precision on the residual space. Scalar or pxp matrix.
-        Almast alway a scalar. If it is a matrix it MUST match the dimensions
-        of the output of residual.
-        """
+        """Gets the precision of the edge. A quantification of how accurate we believe
+        our residual calculation is."""
         ...
 
 
 class DeltaEdgeState(EdgeState):
     """
     Specific edge state which gives residual: r = delta_i - M_i,j delta_j
-    where M is a linear transformation, i.e. matrix.
+    where M is a linear transformation, stored as a matrix.
+
+    Attributes:
+        precision (float | np.ndarray): Precision of the edge
+        matrix (np.darray): Matrix for the delta edge.
     """
 
     def __init__(
@@ -63,6 +72,17 @@ class DeltaEdgeState(EdgeState):
         rolled_i: State,
         rolled_j: State,
     ) -> np.ndarray:
+        """TODO.
+
+        Args:
+            state_i (State): New State for node i.
+            state_j (State): New State for node j.
+            rolled_i (State): Rolled State for node i.
+            rolled_j (State): Rolled State for node j.
+
+        Returns:
+            np.ndarray
+        """
 
         # Make the increments.
         delta_i = state_i.parameters() - rolled_i.parameters()

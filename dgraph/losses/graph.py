@@ -9,15 +9,23 @@ class GraphLoss:
     """
     Sums the precision weighted residual norm over all directed edges:
 
-        L = Σ_{(i,j)}  r_{i,j}^T  Λ_{i,j}  r_{i,j}
+        L = Σ_{(i,j)}  r_{i,j}^T  A_{i,j}  r_{i,j}
 
     where r = edge.residual(state_i, state_j, rolled_i, rolled_j)
-    and   Λ = edge.precision  (scalar or matrix).
+    and   A = edge.precision  (scalar or matrix).
 
     Edges whose endpoints are missing from either graph are skipped.
     """
 
     def __call__(self, graph: Graph, rolled_prior: Graph) -> float:
+        """
+        Args:
+            graph (Graph)
+            rolled_prior (graph)
+
+        Returns:
+            TODO.
+        """
         total = 0.0
         for (nid_i, nid_j), edge in graph.edges.items():
             try:

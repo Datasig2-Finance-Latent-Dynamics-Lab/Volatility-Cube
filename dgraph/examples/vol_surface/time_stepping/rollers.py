@@ -1,8 +1,7 @@
-import numpy as np
 import pandas as pd
 
 from dgraph.source.graph import Graph
-from dgraph.time_stepping.roller import Roller
+from dgraph.time_stepping.roller import Roller, decay_precision
 
 
 class SurfaceRoller(Roller):
@@ -14,10 +13,7 @@ class SurfaceRoller(Roller):
     """
 
     def roll(self, graph: Graph, dt: float) -> Graph:
-        new_nodes = {
-            nid: state.with_precision(state.precision * np.exp(-dt))
-            for nid, state in graph.nodes.items()
-        }
+        new_nodes = {nid: decay_precision(state, dt) for nid, state in graph.nodes.items()}
         return Graph(
             graph.date + pd.Timedelta(days=round(dt * 365)),
             new_nodes,
