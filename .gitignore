@@ -13,3 +13,9 @@ ignore
 data/
 
 quant_data-main/
+
+dissertation/
+
+legacy/
+
+trained_models/
