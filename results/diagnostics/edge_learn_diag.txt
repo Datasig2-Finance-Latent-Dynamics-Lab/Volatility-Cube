@@ -1,0 +1,12 @@
+LEARNED CROSS-ASSET EDGE DIAGNOSTICS v2 (day-aligned increments)
+p=13 pooled_increments=20367
+PCA EVR of increment modes: 0.548, 0.319, 0.087, 0.028, 0.009  (top2=87%)
+market edges: 105
+mean learned beta vs SPY per asset (ALIGNED):
+   AAPL   beta=+0.45  (n=15)
+   AMD    beta=+0.49  (n=15)
+   AMZN   beta=+0.59  (n=15)
+   GOOGL  beta=+0.38  (n=15)
+   META   beta=+0.39  (n=15)
+   MSFT   beta=+0.41  (n=15)
+   TSLA   beta=+0.40  (n=15)
