@@ -100,6 +100,14 @@ forward for 100 days, so error compounds. The persistence baseline is re-seeded 
 true previous day at every step, which is what makes it the bar to beat rather than just
 another free-running model.
 
+Note that this is not an apples-to-apples comparison, and deliberately so: persistence sees
+strictly more data than the free-running models. It is re-fitted every step on the *full*
+previous-day surface (every available quote, `yesterday=Full()` plus `reseed_each_step`),
+whereas the other models see the true surface only once to seed day 0 and from then on get
+20 quotes per asset per day and their own carried fit. So persistence is not a competitor
+here, it is an upper reference: the score a model would need to match while working from a
+small fraction of the information.
+
 | Model | RMSE (vol pts) | % outside spread | Miss (spread widths) |
 |---|---|---|---|
 | persistence baseline | 2.77 | 76.3 | 4.07 |
@@ -117,9 +125,12 @@ smoothing rescues it. Structured bases (SSVI, or a B-spline with a temporal pena
 within a few spread widths on the same data.
 
 **Persistence is very hard to beat.** In free-running mode nothing beats simply carrying
-yesterday's surface forward. That is not a negative result about the models so much as a
-statement about the data: daily surface changes are small relative to what you can infer
-from 20 quotes. Only in the accurate-prior setting does a model (the delta CNP, which
+yesterday's surface forward, though as noted above persistence is fed the whole previous-day
+surface each step while the others live on 20 quotes a day. That is not a negative result
+about the models so much as a statement about the data: daily surface changes are small
+relative to what you can infer from 20 quotes, so a day-old full surface is a lot of
+information. Only in the accurate-prior setting, where every model is handed the same
+accurate prior, does a model (the delta CNP, which
 predicts increments off the prior rather than absolute levels) beat it, at 70% versus 76%
 of points outside the spread.
 
