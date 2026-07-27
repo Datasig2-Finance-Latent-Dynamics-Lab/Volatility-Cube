@@ -1,8 +1,8 @@
 """
 Error metrics and the liquid/illiquid region split.
 
-The liquid region is the near-ATM, short-dated band traders quote directly; the illiquid
-region (wide strikes, long maturities) is what the bank wants systematically extrapolated.
+The liquid region is the near-ATM, short-dated band that is quoted directly; the illiquid
+region (wide strikes, long maturities) is what has to be extrapolated systematically.
 Splitting RMSE this way is the headline diagnostic: how well does each method extrapolate
 into the region it was *not* given?
 """

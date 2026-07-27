@@ -114,7 +114,7 @@ class RegularizedBSpline(SurfaceModel):
         # fit on sparse data; fixed (data-independent), so it's negligible once a node is well
         # sampled → the fit still converges to the interpolant as observations grow.
         self.lambda_rough = lambda_rough          # default tuned so 13 coeffs stay tame at low n
-        self.n_interior = n_interior              # bank convention: 9 interior knots
+        self.n_interior = n_interior              # desk convention: 9 interior knots
         self.degree = degree
         self._D2D2 = None                         # D2ᵀD2 curvature matrix (built in train)
         self.edge_weight = edge_weight

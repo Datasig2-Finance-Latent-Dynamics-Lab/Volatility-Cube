@@ -1,5 +1,5 @@
 """
-Sequential asymmetric-liquidity decay experiment (Alvaro's design).
+Sequential asymmetric-liquidity decay experiment.
 
 Train a filter on the first 500 days (all assets, full info). Then free-run days 500..899:
 every day the TARGET (AAPL) gets only N sparse quotes while every peer is fully observed;

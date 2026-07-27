@@ -22,9 +22,9 @@ Because every model shares this contract, the whole cross-method comparison fall
 ## The problem
 
 Given *yesterday's* surface per asset plus *a few* of today's quotes, predict today's full
-surface — exploiting both temporal persistence and cross-asset structure. The motivating
-use case is a bank that wants systematic, arbitrage-free extrapolation into the illiquid
-region (wide strikes, long maturities) to support trader judgement.
+surface, exploiting both temporal persistence and cross-asset structure. The motivating use
+case is a desk that wants systematic, arbitrage-free extrapolation into the illiquid region
+(wide strikes, long maturities) to support trader judgement.
 
 ## Layout
 
@@ -32,11 +32,13 @@ region (wide strikes, long maturities) to support trader judgement.
 surfacelab/
   core/        types (Quotes, QueryPoints, SurfacePrediction), SurfaceModel, arbitrage checks
   data/        Dataset + loaders (load_heston, load_grouptech) + compute_bspline_prior
+               + generate_heston (builds the synthetic dataset)
   models/      parametric/{svi,ssvi,bspline,pca} · factors (shared PCA basis) ·
                regularized (closed-form B-spline + scipy SVI/SSVI) · kalman · cnp/ · registry
   eval/        metrics · records (→ records.csv + summary.csv) · harness (run, run_sequential)
   analytics/   plots (reconstruction, RMSE-vs-ctx, decay) · report (HTML) · latent (CNP)
-  experiments/ configs · run.py (CLI entry point)
+  experiments/ configs · run.py (CLI entry point) · CNP training scripts
+  statistics/  cross-asset exploitability analysis (own README)
 ```
 
 ## Running
@@ -75,20 +77,17 @@ on it automatically.
 
 ## Notes
 
-- Trained CNPs are cached under `../trained_models/` and loaded by `train(saved=True)`
-  (training is slow). The bundled `cnp.pt` reproduces the absolute-CNP numbers; retrain a
-  delta CNP with `--retrain` for best increment-model results.
+- Trained CNPs are cached under `../trained_models/` and loaded by `train(saved=True)`.
+  Checkpoints are not committed, so the first run of a CNP config trains and caches one
+  (slow, GPU recommended); `--retrain` forces a fresh one. A checkpoint that does not match
+  the current architecture is discarded with a warning rather than aborting the run.
 - The closed-form `RegularizedBSpline` solves the joint data+temporal+graph quadratic in one
   block linear system (the headline efficiency trick). The SVI/SSVI regularised variants use
   scipy and are correspondingly slower in long sequential runs.
-- **Cross-asset graph edges** (`models/edges.py`) keep the full dgraph flexibility. An edge
+- **Cross-asset graph edges** (`models/edges.py`) stay fully general. An edge
   (i→j) carries a `DeltaEdge(precision, matrix)` penalising `(c_i−p_i) − M·(c_j−p_j)`.
   Choose the structure via the regularised models' `edges=` argument:
   `uniform` · `tiered` (SPY-leads-stocks asymmetry) · `factored` (+ cross-maturity decay) ·
   `learned` (OLS coupling matrix M fit on the training Δθ history) · `learned_diag` ·
-  `learned_scalar` (|corr| precision). The learners are ported from dgraph's
-  `learn_surface_edges` family; learned/builder edges are resolved once in `train()`.
-- The older `dgraph/`, `neural_processes/`, `KalmanFilter/`, and `shared/` packages are the
-  reference implementations this package was ported from; they are superseded and slated to
-  move under `legacy/` once full-data numbers are signed off.
-```
+  `learned_scalar` (|corr| precision). Learned and builder edges are resolved once in
+  `train()`.

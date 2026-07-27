@@ -1,21 +1,35 @@
+# ---- environments ----
 .venv/
 ven/
+env/
 
+# ---- python ----
 __pycache__/
 *.pyc
+*.pyo
+.ipynb_checkpoints/
+.pytest_cache/
+*.egg-info/
 
+# ---- editor / tooling ----
 .claude
+.vscode/
+.idea/
+.DS_Store
 
-oldthings
+# ---- data (not redistributable, see README) ----
+# Leading slash matters: a bare `data/` would also swallow surfacelab/data/.
+/data/
+/quant_data-main/
 
-ignore
+# ---- model checkpoints (regenerate with --retrain) ----
+/trained_models/
 
-data/
+# ---- run outputs (a curated subset lives in figures/) ----
+/results/
 
-quant_data-main/
-
-dissertation/
-
-legacy/
-
-trained_models/
+# ---- dissertation text and superseded code ----
+/dissertation/
+/legacy/
+/oldthings/
+/ignore/

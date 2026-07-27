@@ -14,6 +14,8 @@ Two modes:
 from __future__ import annotations
 
 from pathlib import Path
+import warnings
+
 import numpy as np
 
 from surfacelab.core.model import SurfaceModel, TRAINED_MODELS_DIR
@@ -57,8 +59,19 @@ class CNPModel(SurfaceModel):
         path = Path(self.checkpoint) if self.checkpoint else self.cache_path(".pt")
         cls = FittedDeltaCNP if self.delta else FittedCNP
         if not force and path.exists():
-            self.fitted = cls.load(str(path), device=self.device)
-            return
+            try:
+                self.fitted = cls.load(str(path), device=self.device)
+                return
+            except Exception as exc:
+                # A checkpoint written by an older architecture will not load.  Retrain
+                # rather than abort, so a stale cache never breaks a whole run.
+                if self.config is None:
+                    raise RuntimeError(
+                        f"Cached CNP at {path} does not match the current architecture and "
+                        f"no training config was given, so it cannot be rebuilt: {exc}"
+                    ) from exc
+                warnings.warn(f"ignoring unloadable checkpoint {path} "
+                              f"({type(exc).__name__}: {str(exc).splitlines()[0]}); retraining")
         if self.config is None:
             raise RuntimeError(
                 f"No cached CNP at {path} and no training config provided. "

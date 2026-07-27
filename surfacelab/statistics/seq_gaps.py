@@ -1,5 +1,5 @@
 """
-Sequential decay with RANDOM intermittent gaps in the target (Alvaro's variant).
+Sequential decay with RANDOM intermittent gaps in the target.
 
 Like seq_asymmetric.py, but the target (AAPL) gets a RANDOM number of quotes each day —
 0 w.p. 0.5, 1 w.p. 0.3, 2 w.p. 0.2 — while peers are always fully observed. On the many
