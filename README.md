@@ -2,7 +2,9 @@
 
 Predicting a full implied volatility surface from very few quotes, and testing honestly
 whether the usual tricks (temporal persistence, cross-asset structure, neural methods)
-actually help.
+actually help. Short answer: under scarcity, structure beats flexibility, yesterday's surface
+is the thing to beat, and coupling assets together adds essentially nothing once a market
+factor is accounted for.
 
 This is the code behind my MSc dissertation. Everything from a per-day SVI fit to a
 Conditional Neural Process implements one interface, so a single evaluation harness compares
@@ -25,7 +27,11 @@ information are available beyond today's quotes:
    name.
 
 Most of the work went into finding out how much each is worth, and the answers came out less
-flattering than I expected.
+flattering than I expected: time is worth a lot, cross-asset is worth close to nothing. Most
+of that 0.42 is just the whole market moving together, and a single quote on the name already
+reveals that. Once SPY is regressed out, the correlation left between two names is about
+0.27, and point for point in the wings, where the quotes are actually missing, it is about
+0.16.
 
 ## What is in here
 
@@ -95,6 +101,11 @@ and is scored on the illiquid region.
 | B-spline, data only | 6.80 | 85.4 | 11.45 |
 | absolute CNP | 4.23 | 92.1 | 10.10 |
 
+The CNP rows come with a caveat these three columns do not show: the network breaks butterfly
+no-arbitrage on about one point in six (the structured fits are at or near zero), so a surface
+it produces cannot be quoted as it stands. Read the neural numbers as an upper bound on what
+flexibility buys, not as a usable model.
+
 **Free running** (sequential mode, `thesis_sequential`): each model carries its own fit
 forward for 100 days, so error compounds. The persistence baseline is re-seeded with the
 true previous day at every step, which is what makes it the bar to beat rather than just
@@ -115,6 +126,12 @@ small fraction of the information.
 | Kalman on SSVI increments | 4.13 | 87.8 | 5.79 |
 | SSVI, data only | 4.55 | 88.7 | 6.56 |
 | absolute CNP | 4.21 | 91.9 | 9.98 |
+
+The delta CNP is absent here on purpose: left to carry its own prior forward, the prior it
+subtracts drifts away from the accurate fit it was trained against and the error grows by a
+few hundredths of a vol point a day until it is several vol points out. It is only run in the
+re-anchored setting above. The absolute CNP, which carries nothing forward, is the neural
+model that free-runs.
 
 ### What that says
 
@@ -139,29 +156,62 @@ its parameters than the level. `kalman_ssvi_inc` beats `kalman_ssvi` consistentl
 delta CNP beats the absolute CNP by a wide margin. Absolute models spend all their capacity
 re-learning the level they were already handed.
 
-**Cross-asset is worth much less than the correlation suggests, and only under asymmetric
-liquidity.** This was the interesting part. The 0.42 ATM correlation is real, but what a
-peer can add is only the shared variance your own quotes have not already pinned down. With
-a one-factor structure (common share ρ) and own-observation noise-to-signal `r`, the
-maximum fraction of residual variance any cross-asset information can remove is
+**Cross-asset coupling is redundant.** This was the interesting part, and the answer is
+negative. Run each family twice, identical except for the coupling, and the structured models
+do not move. Kalman on SSVI increments goes 4.6 → 4.6 vol points at 10 quotes and 4.5 → 4.5
+at 100, and a moving-block bootstrap over the 100 eval days puts the difference at -0.03
+[-0.11, +0.06] and -0.00 [-0.05, +0.05], so it is a genuine null rather than two close
+numbers read carelessly. The graph-penalised B-spline comes out somewhat *worse* with the
+coupling on. The only family that gains is the CNP (5.1 → 4.1 at 10 quotes, interval
+[+0.77, +1.31], clearly real), and that gain does not rescue it: it still lands the fewest
+points inside the spread of any model and still breaks butterfly arbitrage on one point in
+six. The gain is also probably overstated, since the no-cross-asset variant is made by
+masking the attention at prediction time on a network trained to attend across all assets.
+
+So the split is between models that couple *parameters* (Kalman transitions, the B-spline
+graph penalty), which get nothing, and a flexible model that reads peer *shape and level*
+directly, which gets something but only ever a slightly better version of a model that was
+not usable to begin with. The 6 percentage point gain the delta CNP shows over its
+single-asset twin in the table above is the same effect, and carries the same caveat.
+
+**Why.** A link can only inform the daily increment, since yesterday's surface is already
+held as the prior. Most of that increment is the market level, and one ATM quote on the name
+pins the level down, so a rigid coupling supplies what the name supplies for itself. What is
+genuinely peer-specific is about 0.4 vol points in the wings, against a mean wing spread of
+about 1.2 vol points, and a correction smaller than the spread it is trying to land inside
+cannot make a quote usefully better. The formal version: with a one-factor structure (common
+share ρ) and own-observation noise-to-signal `r`, the most residual variance any cross-asset
+information can remove is
 
 ```
 C = ρr / ((1 - ρ) + r),   capped at ρ
 ```
 
 which goes to zero as your own quotes get good, and to ρ only when they are useless. When
-the harness sparsifies every asset equally, which is the obvious way to set the experiment
-up and what I did at first, peers are as blind as you are, the correlation you can measure
-from those few quotes collapses towards zero, and the realizable gain is about 4% in RMSE
+every asset is sparsified equally, peers are as blind as you are, the correlation you can
+measure from a few quotes collapses towards zero, and the realizable gain is about 4% in RMSE
 terms. The CNP declining to learn cross-asset coupling in that setup is the correct
-inference, not a training failure.
+inference, not a training failure. Hold the peers at full quotes and sparsify only the
+target and the ceiling rises (a perfectly observed SPY removes about 22% of a sparse name's
+residual variance, all peers together about 42%), but that is a ceiling on variance, not a
+gain in usable quotes, and the on/off tests above are where it gets cashed out.
 
-Hold the liquid names at full quotes and sparsify only the target, which is what the real
-market looks like, and it changes: a perfectly observed SPY removes about 22% of a sparse
-name's residual variance, all peers together about 42%. That shows up downstream as the
-delta CNP's 6 percentage point gain over its single-asset twin in the table above. The
-structured increment-coupling models (Kalman, graph-penalised B-spline) never capture it,
-because they couple parameters, not shape.
+**The one regime where peers are not optional, and it still loses.** Hold an asset out
+entirely, give it no quotes of its own, and rebuild it from the seven peers plus the carried
+prior. Without peers the models collapse (the no-peer CNP is frozen 33 vol points out, the
+no-peer Kalman falls back to a stale baseline at 7). With peers the best reconstructions get
+back to about 3.6-3.9 vol points and a miss of 5-7 spread widths. But carrying AAPL's own
+day-old surface forward sits at 2.8 and a miss of 4, so a peer can stand in for a missing
+name, just not as well as that name's own stale data. Cross-asset information is essential
+only where a desk would rarely sit, a name with no quotes at all *and* no usable recent
+surface, and even there it does not beat doing nothing. The links carry real information;
+the bar they have to clear is a name's own stale surface, and they do not reach it in any
+regime tested here.
+
+The caveat is that this is eight large, tightly co-moving US names over one calm four-year
+stretch, which is the most favourable case for a single market factor to absorb everything
+and so the least favourable for cross-asset links. A more mixed universe, or a crisis where
+the factor structure itself moves, is the most likely place the answer flips.
 
 Derivation, Monte Carlo validation and the empirical version are in
 `surfacelab/statistics/` (see its README).
@@ -184,8 +234,9 @@ Right: oracle bound versus what is realizable when peers are estimated too:
 
 ![ceiling](figures/cross_asset_ceiling_sweep.png)
 
-Under asymmetric liquidity it is a different story. Fraction of a sparse target's residual
-variance removed by well observed peers:
+Under asymmetric liquidity the ceiling is much higher, which is what makes the null result
+above worth stating rather than obvious. Fraction of a sparse target's residual variance
+removed by well observed peers:
 
 ![asymmetric](figures/cross_asset_asymmetric_liquidity.png)
 
@@ -214,9 +265,13 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 # synthetic Heston data, all methods, accurate prior
 .venv/bin/python3 -m surfacelab.experiments.run --config heston_all_methods
 
-# the two thesis runs on market data
+# the thesis runs on market data
 .venv/bin/python3 -m surfacelab.experiments.run --config thesis_perfect_prior
 .venv/bin/python3 -m surfacelab.experiments.run --config thesis_sequential
+
+# the cross-asset regimes: AAPL held out entirely, and AAPL sparse with peers full
+.venv/bin/python3 -m surfacelab.experiments.run --config thesis_exclude_aapl
+.venv/bin/python3 -m surfacelab.experiments.run --config thesis_asym_aapl
 
 # the cross-asset analysis
 .venv/bin/python3 -m surfacelab.statistics.run
