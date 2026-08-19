@@ -22,7 +22,8 @@ from surfacelab.data import compute_bspline_prior
 from surfacelab.models import registry
 from surfacelab.eval import (run, run_sequential, run_exclude, run_sequential_exclude,
                              run_target_asymmetric, run_models)
-from surfacelab.experiments.configs import get_experiment, CNPTrainConfig
+from surfacelab.experiments.configs import (get_experiment, make_experiment,
+                                            EXPERIMENTS, LOADERS, CNPTrainConfig)
 
 warnings.filterwarnings("ignore")
 
@@ -44,7 +45,17 @@ def _finish(rec, exp, args, models, dataset, mode) -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="surfacelab experiment runner")
-    ap.add_argument("--config", required=True, help="experiment name (see configs.py)")
+    ap.add_argument("--config", required=True,
+                    help="experiment name: a key in configs.py, or ANY name (e.g. a generated "
+                         "'iv_surface_xxx') when --dataset and --models are also given")
+    ap.add_argument("--dataset", choices=sorted(LOADERS), default=None,
+                    help="ad-hoc run: dataset loader (heston | market | market_thesis)")
+    ap.add_argument("--models", default=None,
+                    help="ad-hoc run: comma-separated registry names, e.g. bspline,prior,ssvi")
+    ap.add_argument("--mode", choices=["independent", "sequential"], default="independent",
+                    help="ad-hoc run: harness mode (default independent)")
+    ap.add_argument("--no-prior", action="store_true",
+                    help="ad-hoc run: skip the B-spline prior computation")
     ap.add_argument("--sequential", action="store_true",
                     help="force sequential mode regardless of the config default")
     ap.add_argument("--retrain", action="store_true",
@@ -64,7 +75,16 @@ def main() -> None:
                          "sparse sample ('match', the fair regime). Default: the config's.")
     args = ap.parse_args()
 
-    exp = get_experiment(args.config)
+    if args.config not in EXPERIMENTS and (args.dataset or args.models):
+        if not (args.dataset and args.models):
+            ap.error("an ad-hoc --config needs BOTH --dataset and --models")
+        names = [registry.resolve(m.strip()) for m in args.models.split(",") if m.strip()]
+        exp = make_experiment(args.config, args.dataset, [(n, {}) for n in names],
+                              mode=args.mode, needs_prior=not args.no_prior)
+        print(f"Ad-hoc experiment '{exp.name}': dataset={args.dataset} models={names} "
+              f"mode={exp.mode}")
+    else:
+        exp = get_experiment(args.config)
     mode = "sequential" if args.sequential else exp.mode
     prior_ctx = args.prior_ctx or exp.prior_ctx
 

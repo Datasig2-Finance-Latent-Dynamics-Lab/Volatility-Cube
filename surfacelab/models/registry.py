@@ -76,7 +76,27 @@ REGISTRY = {
 }
 
 
+# File stems under surfacelab/models/ that people (and the web UI) mistake for model
+# names → the registry key they actually correspond to.  Stems with no model behind them
+# (registry, edges, factors, base, module, trainer, representations) are NOT models.
+ALIASES = {
+    "bspline_basis":  "kalman_bspline",     # fixed B-spline basis inside KalmanFactorModel
+    "prior_baseline": "prior",
+    "model":          "cnp",                # surfacelab/models/cnp/model.py
+    "parametric":     "bspline",
+}
+
+
+def resolve(name: str) -> str:
+    """Map a user/UI-supplied name to a registry key, with a helpful error otherwise."""
+    if name in REGISTRY:
+        return name
+    if name in ALIASES:
+        return ALIASES[name]
+    import difflib
+    near = difflib.get_close_matches(name, REGISTRY, n=5)
+    raise KeyError(f"unknown model '{name}'. Did you mean {near}? Known: {sorted(REGISTRY)}")
+
+
 def build(name: str, **kwargs):
-    if name not in REGISTRY:
-        raise KeyError(f"unknown model '{name}'. Known: {sorted(REGISTRY)}")
-    return REGISTRY[name](**kwargs)
+    return REGISTRY[resolve(name)](**kwargs)

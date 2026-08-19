@@ -439,51 +439,6 @@ EXPERIMENTS.update({
                 ("kalman_bspline_inc_nox", {"n_history": THESIS_HIST})],
         specs=lambda F: [m for f in F.values() for m in _sweep_carry(f, THESIS_CTX)],
     ),
-  # Add to surfacelab/experiments/configs.py (the real orchestrator reads named
-# experiments from this file — it does not take dataset/model/metric flags directly).
-# _heston()/_market() are the factories already defined near the top of configs.py.
-  "iv_surface_mt0856ij_2": Experiment(
-      name="iv_surface_mt0856ij_2",
-      loader=_market(),  # surfacelab/data/market.py
-      models=[
-          ("model", {}),
-          ("bspline_basis", {}),
-          ("module", {}),
-          ("trainer", {}),
-          ("edges", {}),
-          ("factors", {}),
-          ("kalman_ssvi", {}),
-          ("kalman", {}),
-          ("base", {}),
-          ("pca", {}),
-          ("representations", {}),
-          ("prior_baseline", {}),
-          ("registry", {}),
-          ("regularized", {}),
-      ],
-      mode="independent",
-  ),
-  "iv_surface_mt0856ij_1": Experiment(
-      name="iv_surface_mt0856ij_1",
-      loader=_heston(),  # surfacelab/data/heston.py
-      models=[
-          ("model", {}),
-          ("bspline_basis", {}),
-          ("module", {}),
-          ("trainer", {}),
-          ("edges", {}),
-          ("factors", {}),
-          ("kalman_ssvi", {}),
-          ("kalman", {}),
-          ("base", {}),
-          ("pca", {}),
-          ("representations", {}),
-          ("prior_baseline", {}),
-          ("registry", {}),
-          ("regularized", {}),
-      ],
-      mode="independent",
-  ),
 })
 
 
@@ -501,7 +456,31 @@ EXPERIMENTS.update({
 })
 
 
+# ── ad-hoc experiments (built from CLI flags, no configs.py edit needed) ────────────
+# The dataset column of the web UI maps onto these loader factories; anything else in
+# surfacelab/data/ (dataset.py, prior.py, generate_heston.py) is not a loadable dataset.
+LOADERS: dict[str, Callable] = {
+    "heston":        lambda: _heston(n_train=None, n_val=40),
+    "market":        lambda: _market(n_eval=10),
+    "market_thesis": lambda: _market_thesis(),
+}
+
+
+def make_experiment(name: str, dataset: str, models: list[tuple[str, dict]],
+                    mode: str = "independent", needs_prior: bool = True) -> Experiment:
+    """Build an Experiment on the fly (used by run.py when --dataset/--models are given, so
+    a generated config name such as 'iv_surface_mt07loo4' never has to exist in this file)."""
+    if dataset not in LOADERS:
+        raise KeyError(f"unknown dataset '{dataset}'. Known: {sorted(LOADERS)}")
+    if mode not in ("independent", "sequential"):
+        raise ValueError(f"mode must be 'independent' or 'sequential'; got {mode!r}")
+    return Experiment(name=name, loader=LOADERS[dataset](), models=list(models),
+                      mode=mode, needs_prior=needs_prior)
+
+
 def get_experiment(name: str) -> Experiment:
     if name not in EXPERIMENTS:
-        raise KeyError(f"unknown experiment '{name}'. Known: {sorted(EXPERIMENTS)}")
+        raise KeyError(f"unknown experiment '{name}'. Known: {sorted(EXPERIMENTS)}. "
+                       "For a generated name, pass --dataset and --models instead of "
+                       "editing configs.py (see `python -m surfacelab.experiments.run -h`).")
     return EXPERIMENTS[name]
