@@ -96,8 +96,28 @@ def _heston(n_train=None, n_val=40):
     return lambda: load_heston(HESTON_TRAIN, HESTON_OOD, n_train_days=n_train, n_val_days=n_val)
 
 
+class MissingMarketDataError(FileNotFoundError):
+    """Raised instead of letting a bare duckdb/glob IOException surface when the licensed
+    market CSV (see README.md → Data → Market) isn't present on this checkout."""
+
+
+def _require_market_csv(path: str = MARKET_CSV) -> str:
+    if not Path(path).exists():
+        raise MissingMarketDataError(
+            f"Market data file not found: {path}\n"
+            "This repo does not ship market data (README.md -> 'Data' -> 'Market'): "
+            "market_*/thesis_* experiments need an end-of-day US equity option-chain CSV "
+            "from a Polygon feed that cannot be redistributed.\n"
+            "Fix: point MARKET_CSV in surfacelab/experiments/configs.py at your own chain "
+            "data with the same columns (see surfacelab/data/market.py:load_grouptech), or "
+            "run a heston_* experiment instead -- that dataset is fully self-contained "
+            "(generate it with `python -m surfacelab.data.generate_heston`)."
+        )
+    return path
+
+
 def _market(n_eval=30):
-    return lambda: (load_grouptech(MARKET_CSV, n_eval_days=n_eval), None)
+    return lambda: (load_grouptech(_require_market_csv(), n_eval_days=n_eval), None)
 
 
 # ── composable Model builders (the new path) ──────────────────────────────────────
@@ -317,7 +337,7 @@ THESIS_ASYM_CTX = (1, 2, 3, 5, 10, 20, 50, 100)  # target's own quote count (pee
 def _market_thesis(n_eval=THESIS_N_VAL, n_total=THESIS_N_TOTAL):
     """Last `n_total` trading days, split so the last `n_eval` are the validation window."""
     def load():
-        ds = load_grouptech(MARKET_CSV, n_eval_days=n_eval)
+        ds = load_grouptech(_require_market_csv(), n_eval_days=n_eval)
         if ds.n_days > n_total:
             ds = ds.subset(list(range(ds.n_days - n_total, ds.n_days)))
         return ds, None
