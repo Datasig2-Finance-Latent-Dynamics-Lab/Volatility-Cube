@@ -439,6 +439,51 @@ EXPERIMENTS.update({
                 ("kalman_bspline_inc_nox", {"n_history": THESIS_HIST})],
         specs=lambda F: [m for f in F.values() for m in _sweep_carry(f, THESIS_CTX)],
     ),
+  # Add to surfacelab/experiments/configs.py (the real orchestrator reads named
+# experiments from this file — it does not take dataset/model/metric flags directly).
+# _heston()/_market() are the factories already defined near the top of configs.py.
+  "iv_surface_mt0856ij_2": Experiment(
+      name="iv_surface_mt0856ij_2",
+      loader=_market(),  # surfacelab/data/market.py
+      models=[
+          ("model", {}),
+          ("bspline_basis", {}),
+          ("module", {}),
+          ("trainer", {}),
+          ("edges", {}),
+          ("factors", {}),
+          ("kalman_ssvi", {}),
+          ("kalman", {}),
+          ("base", {}),
+          ("pca", {}),
+          ("representations", {}),
+          ("prior_baseline", {}),
+          ("registry", {}),
+          ("regularized", {}),
+      ],
+      mode="independent",
+  ),
+  "iv_surface_mt0856ij_1": Experiment(
+      name="iv_surface_mt0856ij_1",
+      loader=_heston(),  # surfacelab/data/heston.py
+      models=[
+          ("model", {}),
+          ("bspline_basis", {}),
+          ("module", {}),
+          ("trainer", {}),
+          ("edges", {}),
+          ("factors", {}),
+          ("kalman_ssvi", {}),
+          ("kalman", {}),
+          ("base", {}),
+          ("pca", {}),
+          ("representations", {}),
+          ("prior_baseline", {}),
+          ("registry", {}),
+          ("regularized", {}),
+      ],
+      mode="independent",
+  ),
 })
 
 
