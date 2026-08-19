@@ -23,7 +23,8 @@ from surfacelab.models import registry
 from surfacelab.eval import (run, run_sequential, run_exclude, run_sequential_exclude,
                              run_target_asymmetric, run_models)
 from surfacelab.experiments.configs import (get_experiment, make_experiment,
-                                            EXPERIMENTS, LOADERS, CNPTrainConfig)
+                                            EXPERIMENTS, LOADERS, CNPTrainConfig,
+                                            MissingMarketDataError)
 
 warnings.filterwarnings("ignore")
 
@@ -89,7 +90,10 @@ def main() -> None:
     prior_ctx = args.prior_ctx or exp.prior_ctx
 
     print(f"Loading data for '{exp.name}' …")
-    dataset, _ood = exp.loader()
+    try:
+        dataset, _ood = exp.loader()
+    except MissingMarketDataError as e:
+        raise SystemExit(f"\n{exp.name}: cannot run -- {e}") from None
     if args.quick:
         keep = min(dataset.n_days, 120)
         dataset = dataset.subset(list(range(dataset.n_days - keep, dataset.n_days)))
