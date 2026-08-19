@@ -442,6 +442,20 @@ EXPERIMENTS.update({
 })
 
 
+EXPERIMENTS.update({
+    "iv_surface_mt04ls8x": Experiment(
+        name="iv_surface_mt04ls8x",
+        loader=_market(n_eval=10),
+        models=[("prior", {}),
+                ("bspline_data", {}),
+                ("bspline_temporal", {}),
+                ("ssvi_data", {})],
+        mode="independent",
+        needs_prior=True,
+    ),
+})
+
+
 def get_experiment(name: str) -> Experiment:
     if name not in EXPERIMENTS:
         raise KeyError(f"unknown experiment '{name}'. Known: {sorted(EXPERIMENTS)}")
